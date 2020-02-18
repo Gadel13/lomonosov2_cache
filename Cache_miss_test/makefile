@@ -74,7 +74,7 @@ clean:
 	rm -f *.o main main_double_2sum main_double_3sum main_double_4sum \
 		main_int_1sum main_int_2sum main_int_3sum main_int_4sum \
 		main_int_5sum main_int_6sum main_int_7sum main_double_5sum \
-		main_double_6sum main_double_7sum
+		main_double_6sum main_double_7sum main_without_papi
 	rm -f *.o commands
 	rm -f *.txt
 	rm -f *.png

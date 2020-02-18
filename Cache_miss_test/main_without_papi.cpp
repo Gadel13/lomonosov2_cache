@@ -31,7 +31,7 @@ void cache_test(double* &A, int minute) {
 
 	double sum = 0;
 
-	int num_sum = 6000000000;
+	int num_sum = 60000000;
 
 	int* tmpi = new int[num_sum];
 	for (int i = 0; i < num_sum; i++){
@@ -40,7 +40,7 @@ void cache_test(double* &A, int minute) {
 
 
 	auto begin = std::chrono::high_resolution_clock::now();
-	for(int j = 0; j < minute; j++){
+	for(int j = 0; j < 100*minute; j++){
 		for(int i = 0; i < num_sum; i++) {
 			sum += A[tmpi[i]];
 		}

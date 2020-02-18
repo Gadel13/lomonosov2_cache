@@ -1,8 +1,0 @@
-./main_int_5sum 5;
-srun: Job step aborted: Waiting up to 32 seconds for job step to finish.
-slurmstepd-n48106: *** JOB 1085872 ON n48106 CANCELLED AT 2019-12-23T04:11:47 ***
-srun: got SIGCONT
-srun: forcing job termination
-slurmstepd-n48106: *** STEP 1085872.0 ON n48106 CANCELLED AT 2019-12-23T04:11:47 ***
-srun: error: n48106: task 0: Terminated
-make: *** [test] Terminated

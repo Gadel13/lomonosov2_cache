@@ -31,7 +31,7 @@ void cache_test(double* &A, int minute) {
 
 	double sum = 0;
 
-	int num_sum = 2600000;
+	int num_sum = 130000000;
 
 	int* tmpi = new int[num_sum];
 	for (int i = 0; i < num_sum; i++){

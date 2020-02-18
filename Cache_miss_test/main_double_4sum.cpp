@@ -27,32 +27,28 @@ using namespace std;
 
 void cache_test(double* &A, int num_sum) {	
 	int Events[NUM_EVENTS] = {PAPI_L1_DCM, PAPI_L2_DCM, PAPI_L3_TCM};
-	long long values[NUM_EVENTS] = {0, 0, 0};
+	long long values[NUM_EVENTS];
 	mt19937 gen(time(0)); 
     uniform_int_distribution<int> f(fiMin, fiMax);
 
 
 	double sum = 0;
 
-	int* tmpi = new int[num_sum];
-	for (int i = 0; i < num_sum; i++){
+	int* tmpi = new int[4*num_sum];
+	for (int i = 0; i < 4*num_sum; ++i)
 		tmpi[i] = f(gen);
-	}
 
 	if (PAPI_start_counters(Events, NUM_EVENTS) != PAPI_OK) 
 		cout << "PAPI ERROR";
 
-	int ind;
 
 	auto begin = std::chrono::high_resolution_clock::now();
 	for(int i = 0; i < num_sum; i++) {
-		ind = tmpi[i];
-		sum += A[ind];
+		sum += A[tmpi[4*i]] + A[tmpi[4*i + 1]] + A[tmpi[4*i + 2]] + A[tmpi[4*i + 3]];
 		//sum = sum + A[f(gen)];// + A[f(gen)] - A[f(gen)] - A[f(gen)];
 	}
 	auto end = std::chrono::high_resolution_clock::now();
-
-	if (PAPI_read_counters(values, NUM_EVENTS) != PAPI_OK)
+	if (PAPI_stop_counters(values, NUM_EVENTS) != PAPI_OK)
 		cout << "PAPI ERROR";
 
 	delete[] tmpi;
@@ -60,12 +56,9 @@ void cache_test(double* &A, int num_sum) {
 
 	auto time = std::chrono::duration_cast<std::chrono::nanoseconds>(end-begin).count();
 
-	ofstream REZ("11_REZ_double_1sum.csv", ios::in|ios::app);
-	REZ << "double; "  << sum << ';' << datasize << ';' << num_sum << ';' << time/(1000) << ';'  << values[0] << ';' << values[1] << ';' <<  values[2] << ';' << values[2]/(time/1000) << endl ;
+	ofstream REZ("1111REZ_double_4sum.csv", ios::in|ios::app);
+	REZ << "double; "  << sum << ';' << datasize << ';' << 4*num_sum << ';' << time/(1000) << ';'  << values[0] << ';' << values[1] << ';' <<  values[2] << ';' << (long double)values[2]/(time/1000) << endl ;
 	REZ.close();
-
-	if (PAPI_stop_counters(values, NUM_EVENTS) != PAPI_OK)
-		cout << "PAPI ERROR";
 }
 
 void trash_to_cache(double* &trash) {
@@ -91,7 +84,7 @@ void trash_to_cache(double* &trash) {
 	long double time = (long double)(stop-start)/CLOCKS_PER_SEC;
 
 	ofstream REZ("REZ_trash.csv", ios::in|ios::app);
-	REZ << sum << ";" << datasize << ';' << datasize << ';' << time << ';'  << values_trash[0] << ';' << values_trash[1] << ';' <<  values_trash[2] << ';' << (long double)values_trash[2]/time << endl ;
+	REZ << sum << ";" << datasize << ';' << datasize << ';' << time << ';'  << values_trash[0] << ';' << values_trash[1] << ';' <<  values_trash[2] << ';' << values_trash[2]/time << endl ;
 	REZ.close();
 }
 
@@ -111,7 +104,8 @@ int main (int argc, char** argv) // N - N times call cache_test
 		data[i] = f(gen);
 	}
 
-	for(double k = 1.0/2; k <= 8; k *= 2)
+
+	for(double k = 1.0/32; k <= 8; k *= 2)
 		for (int i = 0; i < atoi(argv[1]); ++i) {
 			trash = new double[datasize];
 			for(int k = 0; k < datasize; k++) {
@@ -120,13 +114,18 @@ int main (int argc, char** argv) // N - N times call cache_test
 			cout << data[fi(gen)] + trash[fi(gen)];
 
 			cache_test(data, (L3size/8) * 1024 * k);
+
 			for(int j = 0; j < 5; j++) {
 				trash_to_cache(trash);
 			}
 
+
 			cout << data[fi(gen)] + trash[fi(gen)] << endl;
 			delete[] trash;
 		}
+
+
+
 
 	delete[] data;
 

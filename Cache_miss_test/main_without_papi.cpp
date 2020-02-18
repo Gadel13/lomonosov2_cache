@@ -24,12 +24,14 @@ using namespace std;
 #define fMax 1000000.0
 
 
-void cache_test(double* &A, int num_sum) {	
+void cache_test(double* &A, int minute) {	
 	mt19937 gen(time(0)); 
     uniform_int_distribution<int> f(fiMin, fiMax);
 
 
 	double sum = 0;
+
+	int num_sum = 2600000;
 
 	int* tmpi = new int[num_sum];
 	for (int i = 0; i < num_sum; i++){
@@ -38,10 +40,9 @@ void cache_test(double* &A, int num_sum) {
 
 
 	auto begin = std::chrono::high_resolution_clock::now();
-	for(int j = 0; j < 1000; j++){
+	for(int j = 0; j < minute; j++){
 		for(int i = 0; i < num_sum; i++) {
 			sum += A[tmpi[i]];
-			//sum = sum + A[f(gen)];// + A[f(gen)] - A[f(gen)] - A[f(gen)];
 		}
 	}
 	auto end = std::chrono::high_resolution_clock::now();
@@ -78,7 +79,7 @@ void trash_to_cache(double* &trash) {
 	REZ.close();
 }
 
-int main (int argc, char** argv) // N - N times call cache_test
+int main (int argc, char** argv) // time min
 {
 	mt19937 gen(time(0)); 
     uniform_real_distribution<> f(fMin, fMax); 
@@ -94,23 +95,24 @@ int main (int argc, char** argv) // N - N times call cache_test
 		data[i] = f(gen);
 	}
 
-	for(double k = 8; k <= 8; k *= 2)
-		for (int i = 0; i < atoi(argv[1]); ++i) {
-			trash = new double[datasize];
-			for(int k = 0; k < datasize; k++) {
-				trash[k] = f(gen);
-			}
-			cout << data[fi(gen)] + trash[fi(gen)];
+	int minute = atoi(argv[1]);
 
-			cache_test(data, (L3size/8) * 1024 * k);
-
-			for(int j = 0; j < 5; j++) {
-				trash_to_cache(trash);
-			}
-
-			cout << data[fi(gen)] + trash[fi(gen)] << endl;
-			delete[] trash;
+	for(double k = 8; k <= 8; k *= 2) {
+		trash = new double[datasize];
+		for(int k = 0; k < datasize; k++) {
+			trash[k] = f(gen);
 		}
+		cout << data[fi(gen)] + trash[fi(gen)];
+
+		cache_test(data, minute);
+
+		for(int j = 0; j < 5; j++) {
+			trash_to_cache(trash);
+		}
+
+		cout << data[fi(gen)] + trash[fi(gen)] << endl;
+		delete[] trash;
+	}
 
 	delete[] data;
 

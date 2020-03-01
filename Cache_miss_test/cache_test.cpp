@@ -17,6 +17,7 @@ using namespace std;
 
 #define number_trash_to_cache_calls 5
 #define datasize 1e8
+#define NUM_EVENTS 3
 
 #define fiMin 0
 #define fiMax datasize-1
@@ -28,7 +29,7 @@ using namespace std;
 #define fMax_int 2e9
 
 template<typename data_type>
-void cache_test(data_type* &A, char d_type, dint num_sum_per_oper, int num_sum) {	
+void cache_test(data_type* &A, char d_type, int num_sum_per_oper, int num_sum) {	
 	int Events[NUM_EVENTS] = {PAPI_L1_DCM, PAPI_L2_DCM, PAPI_L3_TCM};
 	long long values[NUM_EVENTS];
 
@@ -303,7 +304,7 @@ int main (int argc, char** argv) { // <Lx x - Cache level> <d/i/c - double/int/c
 	    uniform_int_distribution<int> fi(fiMin, fiMax);
 
 		int *data = new int[datasize];
-		double *trash;
+		int *trash;
 
 
 		for(int i = 0; i < datasize; i++) {
@@ -312,7 +313,7 @@ int main (int argc, char** argv) { // <Lx x - Cache level> <d/i/c - double/int/c
 
 		for(double k = 1.0/32; k <= 8; k *= 2)
 			for (int i = 0; i < atoi(argv[4]); ++i) {
-				trash = new double[datasize];
+				trash = new int[datasize];
 				for(int k = 0; k < datasize; k++) {
 					trash[k] = f(gen);
 				}

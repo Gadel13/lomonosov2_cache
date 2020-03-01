@@ -1,9 +1,0 @@
-Cannot read kernel map
-Couldn't record kernel reference relocation symbol
-Symbol resolution may be skewed if relocation was used (e.g. kexec).
-Check /proc/kallsyms permission or run as root.
-
-21888:perf-sync:ready:TSC=26552537803600
-[ perf record: Woken up 49 times to write data ]
-[ perf record: Packed 0.001 MB of 0.005 MB, ratio is 5.417 ]
-[ perf record: Captured and wrote 0.008 MB /home/gadel13/lomonosov2_cache/Cache_miss_test/r000hpc/data.0/temp.dryrun.perf ]

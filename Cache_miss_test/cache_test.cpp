@@ -5,6 +5,7 @@
 #include <papi.h>
 #include <random>
 #include <chrono>
+#include <limits>
 
 
 using namespace std;
@@ -16,17 +17,17 @@ using namespace std;
 #define L3size 35000000
 
 #define number_trash_to_cache_calls 5
-#define datasize 1e8
+#define datasize 100000000
 #define NUM_EVENTS 3
 
 #define fiMin 0
 #define fiMax datasize-1
 
-#define fMin_double -1e-308
-#define fMax_double 1e308
+#define fMin_double std::numeric_limits<double>::min()
+#define fMax_double std::numeric_limits<double>::max()
 
-#define fMin_int -2e-9
-#define fMax_int 2e9
+#define fMin_int std::numeric_limits<int>::min()
+#define fMax_int std::numeric_limits<int>::max()
 
 template<typename data_type>
 void cache_test(data_type* &A, char d_type, int num_sum_per_oper, int num_sum) {	

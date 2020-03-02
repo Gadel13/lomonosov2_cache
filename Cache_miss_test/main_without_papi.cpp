@@ -28,7 +28,6 @@ void cache_test(double* &A, int minute) {
 	mt19937 gen(time(0)); 
     uniform_int_distribution<int> f(fiMin, fiMax);
 
-
 	double sum = 0;
 
 	int num_sum = 60000000;
@@ -39,7 +38,10 @@ void cache_test(double* &A, int minute) {
 	}
 
 
+    std::cout << "Start cache_test" << std::endl;
 	auto begin = std::chrono::high_resolution_clock::now();
+
+	#pragma omp parallel for
 	for(int j = 0; j < 100*minute; j++){
 		for(int i = 0; i < num_sum; i++) {
 			sum += A[tmpi[i]];

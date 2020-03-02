@@ -5,6 +5,7 @@
 #include <papi.h>
 #include <random>
 #include <chrono>
+#include <limits>
 
 
 using namespace std;
@@ -16,19 +17,20 @@ using namespace std;
 #define L3size 35000000
 
 #define number_trash_to_cache_calls 5
-#define datasize 1e8
+#define datasize 100000000
+#define NUM_EVENTS 3
 
 #define fiMin 0
 #define fiMax datasize-1
 
-#define fMin_double -1e-308
-#define fMax_double 1e308
+#define fMin_double std::numeric_limits<double>::min()
+#define fMax_double std::numeric_limits<double>::max()
 
-#define fMin_int -2e-9
-#define fMax_int 2e9
+#define fMin_int std::numeric_limits<int>::min()
+#define fMax_int std::numeric_limits<int>::max()
 
 template<typename data_type>
-void cache_test(data_type* &A, char d_type, dint num_sum_per_oper, int num_sum) {	
+void cache_test(data_type* &A, char d_type, int num_sum_per_oper, int num_sum) {	
 	int Events[NUM_EVENTS] = {PAPI_L1_DCM, PAPI_L2_DCM, PAPI_L3_TCM};
 	long long values[NUM_EVENTS];
 
@@ -303,7 +305,7 @@ int main (int argc, char** argv) { // <Lx x - Cache level> <d/i/c - double/int/c
 	    uniform_int_distribution<int> fi(fiMin, fiMax);
 
 		int *data = new int[datasize];
-		double *trash;
+		int *trash;
 
 
 		for(int i = 0; i < datasize; i++) {
@@ -312,7 +314,7 @@ int main (int argc, char** argv) { // <Lx x - Cache level> <d/i/c - double/int/c
 
 		for(double k = 1.0/32; k <= 8; k *= 2)
 			for (int i = 0; i < atoi(argv[4]); ++i) {
-				trash = new double[datasize];
+				trash = new int[datasize];
 				for(int k = 0; k < datasize; k++) {
 					trash[k] = f(gen);
 				}

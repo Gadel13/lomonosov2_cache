@@ -6,6 +6,7 @@
 #include <random>
 #include <chrono>
 #include <limits>
+#include <omp.h>
 
 
 using namespace std;
@@ -14,10 +15,14 @@ using namespace std;
 //all sizes in Bytes
 #define L1size 32000
 #define L2size 256000
-#define L3size 35000000
+#define L3size 6000000
 
-#define number_trash_to_cache_calls 5
-#define datasize 100000000
+#define RAM_size 15000000000
+
+#define number_trash_to_cache_calls 3
+
+long long datasize;
+
 #define NUM_EVENTS 3
 
 #define fiMin 0
@@ -30,7 +35,8 @@ using namespace std;
 #define fMax_int std::numeric_limits<int>::max()
 
 template<typename data_type>
-void cache_test(data_type* &A, char d_type, int num_sum_per_oper, int num_sum) {	
+void cache_test(data_type* &A, char d_type, int num_sum_per_oper, int num_sum) {
+	PAPI_library_init(PAPI_VER_CURRENT);
 	int Events[NUM_EVENTS] = {PAPI_L1_DCM, PAPI_L2_DCM, PAPI_L3_TCM};
 	long long values[NUM_EVENTS];
 
@@ -51,6 +57,7 @@ void cache_test(data_type* &A, char d_type, int num_sum_per_oper, int num_sum) {
 			cout << "PAPI ERROR";
 
 		auto begin = std::chrono::high_resolution_clock::now();
+		#pragma omp parallel for
 		for(int i = 0; i < imax; i += num_sum_per_oper) {
 			sum += A[tmpi[i]];
 		}
@@ -61,7 +68,7 @@ void cache_test(data_type* &A, char d_type, int num_sum_per_oper, int num_sum) {
 
 		auto time = std::chrono::duration_cast<std::chrono::nanoseconds>(end-begin).count();
 
-		ofstream REZ("Result.csv", ios::in|ios::app);
+		ofstream REZ("ResultOMP_1_1thr.csv", ios::in|ios::app);
 		REZ << d_type << "; "  << sum << ';' << datasize << ';' << num_sum << ";" << num_sum_per_oper << ';' << time/(1000) << ';'  << values[0] << ';' << values[1] << ';' <<  values[2] << ';' << (long double)values[2]/(time/1000) << endl ;
 		REZ.close();
 	} if(num_sum_per_oper == 2) {
@@ -69,6 +76,7 @@ void cache_test(data_type* &A, char d_type, int num_sum_per_oper, int num_sum) {
 			cout << "PAPI ERROR";
 
 		auto begin = std::chrono::high_resolution_clock::now();
+		#pragma omp parallel for
 		for(int i = 0; i < imax; i += num_sum_per_oper) {
 			sum += A[tmpi[i]] + A[tmpi[i] + 1];
 		}
@@ -79,7 +87,7 @@ void cache_test(data_type* &A, char d_type, int num_sum_per_oper, int num_sum) {
 
 		auto time = std::chrono::duration_cast<std::chrono::nanoseconds>(end-begin).count();
 
-		ofstream REZ("Result.csv", ios::in|ios::app);
+		ofstream REZ("ResultOMP_1_1thr.csv", ios::in|ios::app);
 		REZ << d_type << "; "  << sum << ';' << datasize << ';' << num_sum << ";" << num_sum_per_oper << ';' << time/(1000) << ';'  << values[0] << ';' << values[1] << ';' <<  values[2] << ';' << (long double)values[2]/(time/1000) << endl ;
 		REZ.close();
 	} if(num_sum_per_oper == 3) {
@@ -87,6 +95,7 @@ void cache_test(data_type* &A, char d_type, int num_sum_per_oper, int num_sum) {
 			cout << "PAPI ERROR";
 
 		auto begin = std::chrono::high_resolution_clock::now();
+		#pragma omp parallel for
 		for(int i = 0; i < imax; i += num_sum_per_oper) {
 			sum += A[tmpi[i]] + A[tmpi[i] + 1] + A[tmpi[i] + 2];
 		}
@@ -97,7 +106,7 @@ void cache_test(data_type* &A, char d_type, int num_sum_per_oper, int num_sum) {
 
 		auto time = std::chrono::duration_cast<std::chrono::nanoseconds>(end-begin).count();
 
-		ofstream REZ("Result.csv", ios::in|ios::app);
+		ofstream REZ("ResultOMP_1_1thr.csv", ios::in|ios::app);
 		REZ << d_type << "; "  << sum << ';' << datasize << ';' << num_sum << ";" << num_sum_per_oper << ';' << time/(1000) << ';'  << values[0] << ';' << values[1] << ';' <<  values[2] << ';' << (long double)values[2]/(time/1000) << endl ;
 		REZ.close();
 	} if(num_sum_per_oper == 4) {
@@ -105,6 +114,7 @@ void cache_test(data_type* &A, char d_type, int num_sum_per_oper, int num_sum) {
 			cout << "PAPI ERROR";
 
 		auto begin = std::chrono::high_resolution_clock::now();
+		#pragma omp parallel for
 		for(int i = 0; i < imax; i += num_sum_per_oper) {
 			sum += A[tmpi[i]] + A[tmpi[i] + 1] + A[tmpi[i] + 2] + A[tmpi[i] + 3];
 		}
@@ -115,7 +125,7 @@ void cache_test(data_type* &A, char d_type, int num_sum_per_oper, int num_sum) {
 
 		auto time = std::chrono::duration_cast<std::chrono::nanoseconds>(end-begin).count();
 
-		ofstream REZ("Result.csv", ios::in|ios::app);
+		ofstream REZ("ResultOMP_1_1thr.csv", ios::in|ios::app);
 		REZ << d_type << "; "  << sum << ';' << datasize << ';' << num_sum << ";" << num_sum_per_oper << ';' << time/(1000) << ';'  << values[0] << ';' << values[1] << ';' <<  values[2] << ';' << (long double)values[2]/(time/1000) << endl ;
 		REZ.close();
 	} if(num_sum_per_oper == 5) {
@@ -123,6 +133,7 @@ void cache_test(data_type* &A, char d_type, int num_sum_per_oper, int num_sum) {
 			cout << "PAPI ERROR";
 
 		auto begin = std::chrono::high_resolution_clock::now();
+		#pragma omp parallel for
 		for(int i = 0; i < imax; i += num_sum_per_oper) {
 			sum += A[tmpi[i]] + A[tmpi[i] + 1] + A[tmpi[i] + 2] + A[tmpi[i] + 3] + A[tmpi[i] + 4];
 		}
@@ -133,7 +144,7 @@ void cache_test(data_type* &A, char d_type, int num_sum_per_oper, int num_sum) {
 
 		auto time = std::chrono::duration_cast<std::chrono::nanoseconds>(end-begin).count();
 
-		ofstream REZ("Result.csv", ios::in|ios::app);
+		ofstream REZ("ResultOMP_1_1thr.csv", ios::in|ios::app);
 		REZ << d_type << "; "  << sum << ';' << datasize << ';' << num_sum << ";" << num_sum_per_oper << ';' << time/(1000) << ';'  << values[0] << ';' << values[1] << ';' <<  values[2] << ';' << (long double)values[2]/(time/1000) << endl ;
 		REZ.close();
 	} if(num_sum_per_oper == 6) {
@@ -141,6 +152,7 @@ void cache_test(data_type* &A, char d_type, int num_sum_per_oper, int num_sum) {
 			cout << "PAPI ERROR";
 
 		auto begin = std::chrono::high_resolution_clock::now();
+		#pragma omp parallel for
 		for(int i = 0; i < imax; i += num_sum_per_oper) {
 			sum += A[tmpi[i]] + A[tmpi[i] + 1] + A[tmpi[i] + 2] + A[tmpi[i] + 3] + A[tmpi[i] + 4] + A[tmpi[i] + 5];
 		}
@@ -151,7 +163,7 @@ void cache_test(data_type* &A, char d_type, int num_sum_per_oper, int num_sum) {
 
 		auto time = std::chrono::duration_cast<std::chrono::nanoseconds>(end-begin).count();
 
-		ofstream REZ("Result.csv", ios::in|ios::app);
+		ofstream REZ("ResultOMP_1_1thr.csv", ios::in|ios::app);
 		REZ << d_type << "; "  << sum << ';' << datasize << ';' << num_sum << ";" << num_sum_per_oper << ';' << time/(1000) << ';'  << values[0] << ';' << values[1] << ';' <<  values[2] << ';' << (long double)values[2]/(time/1000) << endl ;
 		REZ.close();
 	} if(num_sum_per_oper == 7) {
@@ -159,6 +171,7 @@ void cache_test(data_type* &A, char d_type, int num_sum_per_oper, int num_sum) {
 			cout << "PAPI ERROR";
 
 		auto begin = std::chrono::high_resolution_clock::now();
+		#pragma omp parallel for
 		for(int i = 0; i < imax; i += num_sum_per_oper) {
 			sum += A[tmpi[i]] + A[tmpi[i] + 1] + A[tmpi[i] + 2] + A[tmpi[i] + 3] + A[tmpi[i] + 4] + A[tmpi[i] + 5] + A[tmpi[i] + 6];
 		}
@@ -169,7 +182,7 @@ void cache_test(data_type* &A, char d_type, int num_sum_per_oper, int num_sum) {
 
 		auto time = std::chrono::duration_cast<std::chrono::nanoseconds>(end-begin).count();
 
-		ofstream REZ("Result.csv", ios::in|ios::app);
+		ofstream REZ("ResultOMP_1_1thr.csv", ios::in|ios::app);
 		REZ << d_type << "; "  << sum << ';' << datasize << ';' << num_sum << ";" << num_sum_per_oper << ';' << time/(1000) << ';'  << values[0] << ';' << values[1] << ';' <<  values[2] << ';' << (long double)values[2]/(time/1000) << endl ;
 		REZ.close();
 	} if(num_sum_per_oper == 8) {
@@ -177,6 +190,7 @@ void cache_test(data_type* &A, char d_type, int num_sum_per_oper, int num_sum) {
 			cout << "PAPI ERROR";
 
 		auto begin = std::chrono::high_resolution_clock::now();
+		#pragma omp parallel for
 		for(int i = 0; i < imax; i += num_sum_per_oper) {
 			sum += A[tmpi[i]] + A[tmpi[i] + 1] + A[tmpi[i] + 2] + A[tmpi[i] + 3] + A[tmpi[i] + 4] + A[tmpi[i] + 5] + A[tmpi[i] + 6] + A[tmpi[i] + 7];
 		}
@@ -187,7 +201,7 @@ void cache_test(data_type* &A, char d_type, int num_sum_per_oper, int num_sum) {
 
 		auto time = std::chrono::duration_cast<std::chrono::nanoseconds>(end-begin).count();
 
-		ofstream REZ("Result.csv", ios::in|ios::app);
+		ofstream REZ("ResultOMP_1_1thr.csv", ios::in|ios::app);
 		REZ << d_type << "; "  << sum << ';' << datasize << ';' << num_sum << ";" << num_sum_per_oper << ';' << time/(1000) << ';'  << values[0] << ';' << values[1] << ';' <<  values[2] << ';' << (long double)values[2]/(time/1000) << endl ;
 		REZ.close();
 	} if(num_sum_per_oper == 9) {
@@ -195,6 +209,7 @@ void cache_test(data_type* &A, char d_type, int num_sum_per_oper, int num_sum) {
 			cout << "PAPI ERROR";
 
 		auto begin = std::chrono::high_resolution_clock::now();
+		#pragma omp parallel for
 		for(int i = 0; i < imax; i += num_sum_per_oper) {
 			sum += A[tmpi[i]] + A[tmpi[i] + 1] + A[tmpi[i] + 2] + A[tmpi[i] + 3] + A[tmpi[i] + 4] + A[tmpi[i] + 5] + A[tmpi[i] + 6] + A[tmpi[i] + 7] + A[tmpi[i] + 8];
 		}
@@ -205,7 +220,7 @@ void cache_test(data_type* &A, char d_type, int num_sum_per_oper, int num_sum) {
 
 		auto time = std::chrono::duration_cast<std::chrono::nanoseconds>(end-begin).count();
 
-		ofstream REZ("Result.csv", ios::in|ios::app);
+		ofstream REZ("ResultOMP_1_1thr.csv", ios::in|ios::app);
 		REZ << d_type << "; "  << sum << ';' << datasize << ';' << num_sum << ";" << num_sum_per_oper << ';' << time/(1000) << ';'  << values[0] << ';' << values[1] << ';' <<  values[2] << ';' << (long double)values[2]/(time/1000) << endl ;
 		REZ.close();
 	} if(num_sum_per_oper == 10) {
@@ -213,6 +228,7 @@ void cache_test(data_type* &A, char d_type, int num_sum_per_oper, int num_sum) {
 			cout << "PAPI ERROR";
 
 		auto begin = std::chrono::high_resolution_clock::now();
+		#pragma omp parallel for
 		for(int i = 0; i < imax; i += num_sum_per_oper) {
 			sum += A[tmpi[i]] + A[tmpi[i] + 1] + A[tmpi[i] + 2] + A[tmpi[i] + 3] + A[tmpi[i] + 4] + A[tmpi[i] + 5] + A[tmpi[i] + 6] + A[tmpi[i] + 7] + A[tmpi[i] + 8] + A[tmpi[i] + 9];
 		}
@@ -223,7 +239,7 @@ void cache_test(data_type* &A, char d_type, int num_sum_per_oper, int num_sum) {
 
 		auto time = std::chrono::duration_cast<std::chrono::nanoseconds>(end-begin).count();
 
-		ofstream REZ("Result.csv", ios::in|ios::app);
+		ofstream REZ("ResultOMP_1_1thr.csv", ios::in|ios::app);
 		REZ << d_type << "; "  << sum << ';' << datasize << ';' << num_sum << ";" << num_sum_per_oper << ';' << time/(1000) << ';'  << values[0] << ';' << values[1] << ';' <<  values[2] << ';' << (long double)values[2]/(time/1000) << endl ;
 		REZ.close();
 	}
@@ -247,6 +263,7 @@ void trash_to_cache(data_type* &trash) {
 		cout << "PAPI ERROR";
 
 	start = clock();
+	#pragma omp parallel for
 	for(int i = 0; i < datasize; i++) {
 		sum += trash[f(gen)] + trash[f(gen)] + trash[f(gen)] + trash[f(gen)];
 	}
@@ -265,11 +282,14 @@ void trash_to_cache(data_type* &trash) {
 int main (int argc, char** argv) { // <Lx x - Cache level> <d/i/c - double/int/char> <num_sum - number of + operations> <num_iter>
 
 	if(argv[2][0] == 'd') {
+		datasize = 2*RAM_size/(5*sizeof(double)); 
+
 		mt19937 gen(time(0)); 
 		uniform_real_distribution<> f(fMin_double, fMax_double); 
 
 		mt19937 geni(time(0)); 
 		uniform_int_distribution<int> fi(fiMin, fiMax);
+
 
 		double *data = new double[datasize];
 		double *trash;
@@ -298,11 +318,14 @@ int main (int argc, char** argv) { // <Lx x - Cache level> <d/i/c - double/int/c
 		}
 		delete[] data;
 	} else if(argv[2][0] == 'i') {
+	    datasize = 2*RAM_size/(5*sizeof(int));
+
 		mt19937 gen(time(0)); 
 	    uniform_int_distribution<int> f(fMin_int, fMax_int); 
 
 	    mt19937 geni(time(0)); 
 	    uniform_int_distribution<int> fi(fiMin, fiMax);
+
 
 		int *data = new int[datasize];
 		int *trash;

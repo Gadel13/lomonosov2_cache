@@ -7,6 +7,9 @@
 #include <chrono>
 #include <limits>
 #include <omp.h>
+#include <string>
+#include <pthread.h>
+
 
 #include <vector>
 
@@ -16,7 +19,7 @@
 using namespace std;
 
 
-#define thread_num 4
+#define thread_num omp_get_max_threads()
 
 #define ch_num 2
 
@@ -24,13 +27,16 @@ using namespace std;
  
 
 //all sizes in Bytes
-long long L1size = 32*1024;
-long long L2size = 256*1024;
-long long L3size = 6*1024*1024;
+long long L1size = 32*1024; //per thread
+long long L2size = 256*1024; //per thread
+long long L3size = 35*1024*1024;
 
-long long RAM_size = (long long)8*1024*1024*1024;
+long long RAM_size = (long long)thread_num*1024*1024*1024;
 long long datasize;
 long long datasize_per_thread;
+
+int cache_lv; //1 2 3
+char op; //s - store l - load t - total(load/store)
 
 #define NUM_EVENTS 3
 
@@ -46,14 +52,15 @@ long long datasize_per_thread;
 mt19937 gen_cache_test_ind(time(0));
 
 template<typename data_type>
-void cache_test(vector<vector<data_type>>& A, char d_type, int num_sum_per_oper, long long num_sum, long long segment) {
-	omp_set_num_threads(thread_num);
+void cache_test(data_type** A, char d_type, int num_sum_per_oper, long long num_sum, long long segment) {
+	// omp_set_num_threads(thread_num);
+
+	int* EventSet = new int[thread_num];
 
 	PAPI_library_init(PAPI_VER_CURRENT);
 
-	if (PAPI_thread_init(reinterpret_cast<long unsigned int (*)()>(omp_get_thread_num) ) != PAPI_OK)
+	if (PAPI_thread_init( (unsigned long (*)(void))pthread_self ) != PAPI_OK)
 		cout << "thread PAPI ERROR" << endl;
-
 
 	uniform_int_distribution<long long> f_offset(0, datasize_per_thread/segment - 1);
 	long long offset = f_offset(gen_cache_test_ind);
@@ -63,10 +70,33 @@ void cache_test(vector<vector<data_type>>& A, char d_type, int num_sum_per_oper,
 
 	vector<data_type> sum(thread_num);
 	long long imax = num_sum_per_oper*(num_sum/thread_num);
+	if (op == 't') {
+		imax *= 3;
+	}
 
-	vector<vector<long long>> tmpi(thread_num, vector<long long>(imax));
+	if (op == 's') {
+		data_type tmp_sum = 0;
+		#pragma omp parallel
+		{
+			data_type th_tmp_sum = 0;
+			int th = omp_get_thread_num();
+			for(int i = segment*offset; i <= segment*(offset+1); i++){
+				th_tmp_sum += A[th][i];
+			}
+			
+			#pragma omp critical
+			{
+				tmp_sum += th_tmp_sum;
+			}
+		}
+		cout << "tmp sum for store " << tmp_sum << endl;
+	}
+
+	long long ** tmpi = new long long* [thread_num];
 	for(int th = 0; th < thread_num; th++) {
+		tmpi[th] = new long long [imax];
 		sum[th] = 0;
+		EventSet[th] = PAPI_NULL;
 		for (long long i = 0; i < imax; i++){
 			tmpi[th][i] = f_cache_test_ind(gen_cache_test_ind);;
 		}
@@ -76,535 +106,394 @@ void cache_test(vector<vector<data_type>>& A, char d_type, int num_sum_per_oper,
 	long long tot_L1 = 0;
 	long long tot_L2 = 0;
 	long long tot_L3 = 0;
+	int cur_thr;
 
 	// auto begin = std::chrono::high_resolution_clock::now();
-	if(num_sum_per_oper == 1) {
-		#pragma omp parallel
-		{
-			int cur_thr;
-			int papi_status;
-			int EventSet = PAPI_NULL;
-			long long values[NUM_EVENTS];
+	cout << "start counting" << endl;
+	#pragma omp parallel private (cur_thr)
+	{
+		cur_thr = omp_get_thread_num();
+		long long values[NUM_EVENTS] = {0, 0, 0};
 
-			#pragma omp critical
-			{
-				if(PAPI_create_eventset(&EventSet) != PAPI_OK)
-					cout << "EventSet PAPI ERROR" << endl;
+		if(PAPI_register_thread() != PAPI_OK)
+            cout << "register thread PAPI ERROR" << endl;
 
-				if (PAPI_add_event(EventSet, PAPI_L1_LDM) != PAPI_OK)
-			    	cout << "1add event PAPI ERROR" << endl;
+	    EventSet[cur_thr] = PAPI_NULL;
+		if ( PAPI_create_eventset( &( EventSet[cur_thr] ) )  != PAPI_OK )
+			cout << "create EventSet PAPI ERROR" << endl;
 
-			    if (PAPI_add_event(EventSet, PAPI_L2_LDM) != PAPI_OK)
-			    	cout << "2add event PAPI ERROR" << endl;
 
-			    if (PAPI_add_event(EventSet, PAPI_L3_LDM) != PAPI_OK)
-			    	cout << "3add event PAPI ERROR" << endl;
-				cur_thr = omp_get_thread_num();
-				papi_status = PAPI_start(EventSet);
+		if(op == 's') {
+			if (PAPI_add_event(EventSet[cur_thr], PAPI_L1_STM) != PAPI_OK)
+		    	cout << "1add event PAPI ERROR" << endl;
 
+		    if (PAPI_add_event(EventSet[cur_thr], PAPI_L2_STM) != PAPI_OK)
+		    	cout << "2add event PAPI ERROR" << endl;
+
+		    if (PAPI_add_event(EventSet[cur_thr], PAPI_L3_TCM) != PAPI_OK)
+		    	cout << "3add event PAPI ERROR" << endl;
+		} else if(op == 'l') {
+			if (PAPI_add_event(EventSet[cur_thr], PAPI_L1_LDM) != PAPI_OK)
+		    	cout << "1add event PAPI ERROR" << endl;
+
+		    if (PAPI_add_event(EventSet[cur_thr], PAPI_L2_LDM) != PAPI_OK)
+		    	cout << "2add event PAPI ERROR" << endl;
+
+		    if (PAPI_add_event(EventSet[cur_thr], PAPI_L3_LDM) != PAPI_OK)
+		    	cout << "3add event PAPI ERROR" << endl;
+		} else if(op == 't') {
+			if (PAPI_add_event(EventSet[cur_thr], PAPI_L1_TCM) != PAPI_OK)
+		    	cout << "1add event PAPI ERROR" << endl;
+
+		    if (PAPI_add_event(EventSet[cur_thr], PAPI_L2_TCM) != PAPI_OK)
+		    	cout << "2add event PAPI ERROR" << endl;
+
+		    if (PAPI_add_event(EventSet[cur_thr], PAPI_L3_TCM) != PAPI_OK)
+		    	cout << "3add event PAPI ERROR" << endl;
+		}
+
+		if (PAPI_start(EventSet[cur_thr]) != PAPI_OK)
+			cout << "start PAPI ERROR" << endl;
+
+		#pragma omp barrier
+
+		if(num_sum_per_oper == 1) {
+
+			if(op == 's') {
+				begin[cur_thr] = omp_get_wtime() * 1000000;
+				for(long long i = 0; i < imax; i += num_sum_per_oper) {
+					A[cur_thr][tmpi[cur_thr][i]] = i;
+				}
+				end[cur_thr] = omp_get_wtime() * 1000000;
+			} else if(op == 'l') {
+				begin[cur_thr] = omp_get_wtime() * 1000000;
+				for(long long i = 0; i < imax; i += num_sum_per_oper) {
+					sum[cur_thr] += A[cur_thr][tmpi[cur_thr][i]];
+				}
+				end[cur_thr] = omp_get_wtime() * 1000000;
+			} if(op == 't') {
+				begin[cur_thr] = omp_get_wtime() * 1000000;
+				for(long long i = 0; i < imax; i += num_sum_per_oper*3) {
+					A[cur_thr][tmpi[cur_thr][i]] = A[cur_thr][tmpi[cur_thr][i+1]] + A[cur_thr][tmpi[cur_thr][i+2]];
+				}
+				end[cur_thr] = omp_get_wtime() * 1000000;
 			}
 
+		} else if(num_sum_per_oper == 2) {
 
-			if (papi_status != PAPI_OK)
-				cout << "start PAPI ERROR" << endl;
-
-			#pragma omp barrier
-
-			begin[cur_thr] = omp_get_wtime() * 1000000;
-			for(long long i = 0; i < imax; i += num_sum_per_oper) {
-				sum[cur_thr] += A[cur_thr][tmpi[cur_thr][i]];
+			if(op == 's') {
+				begin[cur_thr] = omp_get_wtime() * 1000000;
+				for(long long i = 0; i < imax; i += num_sum_per_oper) {
+					A[cur_thr][tmpi[cur_thr][i]] = i;
+					A[cur_thr][tmpi[cur_thr][i+1]] = i+1;
+				}
+				end[cur_thr] = omp_get_wtime() * 1000000;
+			} else if(op == 'l') {
+				begin[cur_thr] = omp_get_wtime() * 1000000;
+				for(long long i = 0; i < imax; i += num_sum_per_oper) {
+					sum[cur_thr] += A[cur_thr][tmpi[cur_thr][i]] + A[cur_thr][tmpi[cur_thr][i+1]];
+				}
+				end[cur_thr] = omp_get_wtime() * 1000000;
+			} if(op == 't') {
+				begin[cur_thr] = omp_get_wtime() * 1000000;
+				for(long long i = 0; i < imax; i += num_sum_per_oper*3) {
+					A[cur_thr][tmpi[cur_thr][i]] = A[cur_thr][tmpi[cur_thr][i+1]] + A[cur_thr][tmpi[cur_thr][i+2]];
+					A[cur_thr][tmpi[cur_thr][i+3]] = A[cur_thr][tmpi[cur_thr][i+4]] + A[cur_thr][tmpi[cur_thr][i+5]];
+				}
+				end[cur_thr] = omp_get_wtime() * 1000000;
 			}
-			end[cur_thr] = omp_get_wtime() * 1000000;
 
+		} else if(num_sum_per_oper == 3) {
 
-			#pragma omp critical
-			{
-				papi_status = PAPI_stop(EventSet, values);
+			if(op == 's') {
+				begin[cur_thr] = omp_get_wtime() * 1000000;
+				for(long long i = 0; i < imax; i += num_sum_per_oper) {
+					A[cur_thr][tmpi[cur_thr][i]] = i;
+					A[cur_thr][tmpi[cur_thr][i+1]] = i+1;
+					A[cur_thr][tmpi[cur_thr][i+2]] = i+2;
+				}
+				end[cur_thr] = omp_get_wtime() * 1000000;
+			} else if(op == 'l')  {
+				begin[cur_thr] = omp_get_wtime() * 1000000;
+				for(long long i = 0; i < imax; i += num_sum_per_oper) {
+					sum[cur_thr] += A[cur_thr][tmpi[cur_thr][i]] + A[cur_thr][tmpi[cur_thr][i+1]] + A[cur_thr][tmpi[cur_thr][i+2]];
+				}
+				end[cur_thr] = omp_get_wtime() * 1000000;
+			} if(op == 't') {
+				begin[cur_thr] = omp_get_wtime() * 1000000;
+				for(long long i = 0; i < imax; i += num_sum_per_oper*3) {
+					A[cur_thr][tmpi[cur_thr][i]] = A[cur_thr][tmpi[cur_thr][i+1]] + A[cur_thr][tmpi[cur_thr][i+2]];
+					A[cur_thr][tmpi[cur_thr][i+3]] = A[cur_thr][tmpi[cur_thr][i+4]] + A[cur_thr][tmpi[cur_thr][i+5]];
+					A[cur_thr][tmpi[cur_thr][i+6]] = A[cur_thr][tmpi[cur_thr][i+7]] + A[cur_thr][tmpi[cur_thr][i+8]];
+				}
+				end[cur_thr] = omp_get_wtime() * 1000000;
+			}
 
-				if (papi_status != PAPI_OK)
-					cout << "stop PAPI ERROR" << endl;
-				tot_L1 += values[0];
-				tot_L2 += values[1];
-				tot_L3 += values[2];
+		} else if(num_sum_per_oper == 4) {
+
+			if(op == 's') {
+				begin[cur_thr] = omp_get_wtime() * 1000000;
+				for(long long i = 0; i < imax; i += num_sum_per_oper) {
+					A[cur_thr][tmpi[cur_thr][i]] = i;
+					A[cur_thr][tmpi[cur_thr][i+1]] = i+1;
+					A[cur_thr][tmpi[cur_thr][i+2]] = i+2;
+					A[cur_thr][tmpi[cur_thr][i+3]] = i+3;
+				}
+				end[cur_thr] = omp_get_wtime() * 1000000;
+			} else if(op == 'l')  {
+				begin[cur_thr] = omp_get_wtime() * 1000000;
+				for(long long i = 0; i < imax; i += num_sum_per_oper) {
+					sum[cur_thr] += A[cur_thr][tmpi[cur_thr][i]] + A[cur_thr][tmpi[cur_thr][i+1]] + A[cur_thr][tmpi[cur_thr][i+2]] + A[cur_thr][tmpi[cur_thr][i+3]];
+				}
+				end[cur_thr] = omp_get_wtime() * 1000000;
+			} if(op == 't') {
+				begin[cur_thr] = omp_get_wtime() * 1000000;
+				for(long long i = 0; i < imax; i += num_sum_per_oper*3) {
+					A[cur_thr][tmpi[cur_thr][i]] = A[cur_thr][tmpi[cur_thr][i+1]] + A[cur_thr][tmpi[cur_thr][i+2]];
+					A[cur_thr][tmpi[cur_thr][i+3]] = A[cur_thr][tmpi[cur_thr][i+4]] + A[cur_thr][tmpi[cur_thr][i+5]];
+					A[cur_thr][tmpi[cur_thr][i+6]] = A[cur_thr][tmpi[cur_thr][i+7]] + A[cur_thr][tmpi[cur_thr][i+8]];
+					A[cur_thr][tmpi[cur_thr][i+9]] = A[cur_thr][tmpi[cur_thr][i+10]] + A[cur_thr][tmpi[cur_thr][i+11]];
+				}
+				end[cur_thr] = omp_get_wtime() * 1000000;
+			}
+
+		} else if(num_sum_per_oper == 5) {
+
+			if(op == 's') {
+				begin[cur_thr] = omp_get_wtime() * 1000000;
+				for(long long i = 0; i < imax; i += num_sum_per_oper) {
+					A[cur_thr][tmpi[cur_thr][i]] = i;
+					A[cur_thr][tmpi[cur_thr][i+1]] = i+1;
+					A[cur_thr][tmpi[cur_thr][i+2]] = i+2;
+					A[cur_thr][tmpi[cur_thr][i+3]] = i+3;
+					A[cur_thr][tmpi[cur_thr][i+4]] = i+4;
+				}
+				end[cur_thr] = omp_get_wtime() * 1000000;
+			} else if(op == 'l')  {
+				begin[cur_thr] = omp_get_wtime() * 1000000;
+				for(long long i = 0; i < imax; i += num_sum_per_oper) {
+					sum[cur_thr] += A[cur_thr][tmpi[cur_thr][i]] + A[cur_thr][tmpi[cur_thr][i+1]] + A[cur_thr][tmpi[cur_thr][i+2]] + A[cur_thr][tmpi[cur_thr][i+3]] + A[cur_thr][tmpi[cur_thr][i+4]];
+				}
+				end[cur_thr] = omp_get_wtime() * 1000000;
+			} if(op == 't') {
+				begin[cur_thr] = omp_get_wtime() * 1000000;
+				for(long long i = 0; i < imax; i += num_sum_per_oper*3) {
+					A[cur_thr][tmpi[cur_thr][i]] = A[cur_thr][tmpi[cur_thr][i+1]] + A[cur_thr][tmpi[cur_thr][i+2]];
+					A[cur_thr][tmpi[cur_thr][i+3]] = A[cur_thr][tmpi[cur_thr][i+4]] + A[cur_thr][tmpi[cur_thr][i+5]];
+					A[cur_thr][tmpi[cur_thr][i+6]] = A[cur_thr][tmpi[cur_thr][i+7]] + A[cur_thr][tmpi[cur_thr][i+8]];
+					A[cur_thr][tmpi[cur_thr][i+9]] = A[cur_thr][tmpi[cur_thr][i+10]] + A[cur_thr][tmpi[cur_thr][i+11]];
+					A[cur_thr][tmpi[cur_thr][i+12]] = A[cur_thr][tmpi[cur_thr][i+13]] + A[cur_thr][tmpi[cur_thr][i+14]];
+				}
+				end[cur_thr] = omp_get_wtime() * 1000000;
+			}
+
+		} else if(num_sum_per_oper == 6) {
+
+			if(op == 's') {
+				begin[cur_thr] = omp_get_wtime() * 1000000;
+				for(long long i = 0; i < imax; i += num_sum_per_oper) {
+					A[cur_thr][tmpi[cur_thr][i]] = i;
+					A[cur_thr][tmpi[cur_thr][i+1]] = i+1;
+					A[cur_thr][tmpi[cur_thr][i+2]] = i+2;
+					A[cur_thr][tmpi[cur_thr][i+3]] = i+3;
+					A[cur_thr][tmpi[cur_thr][i+4]] = i+4;
+					A[cur_thr][tmpi[cur_thr][i+5]] = i+5;
+				}
+				end[cur_thr] = omp_get_wtime() * 1000000;
+			} else if(op == 'l') {
+				begin[cur_thr] = omp_get_wtime() * 1000000;
+				for(long long i = 0; i < imax; i += num_sum_per_oper) {
+					sum[cur_thr] += A[cur_thr][tmpi[cur_thr][i]] + A[cur_thr][tmpi[cur_thr][i+1]] + A[cur_thr][tmpi[cur_thr][i+2]] + A[cur_thr][tmpi[cur_thr][i+3]] + A[cur_thr][tmpi[cur_thr][i+4]] + A[cur_thr][tmpi[cur_thr][i+5]];
+				}
+				end[cur_thr] = omp_get_wtime() * 1000000;
+			} if(op == 't') {
+				begin[cur_thr] = omp_get_wtime() * 1000000;
+				for(long long i = 0; i < imax; i += num_sum_per_oper*3) {
+					A[cur_thr][tmpi[cur_thr][i]] = A[cur_thr][tmpi[cur_thr][i+1]] + A[cur_thr][tmpi[cur_thr][i+2]];
+					A[cur_thr][tmpi[cur_thr][i+3]] = A[cur_thr][tmpi[cur_thr][i+4]] + A[cur_thr][tmpi[cur_thr][i+5]];
+					A[cur_thr][tmpi[cur_thr][i+6]] = A[cur_thr][tmpi[cur_thr][i+7]] + A[cur_thr][tmpi[cur_thr][i+8]];
+					A[cur_thr][tmpi[cur_thr][i+9]] = A[cur_thr][tmpi[cur_thr][i+10]] + A[cur_thr][tmpi[cur_thr][i+11]];
+					A[cur_thr][tmpi[cur_thr][i+12]] = A[cur_thr][tmpi[cur_thr][i+13]] + A[cur_thr][tmpi[cur_thr][i+14]];
+					A[cur_thr][tmpi[cur_thr][i+15]] = A[cur_thr][tmpi[cur_thr][i+16]] + A[cur_thr][tmpi[cur_thr][i+17]];
+				}
+				end[cur_thr] = omp_get_wtime() * 1000000;
+			}
+
+		} else if(num_sum_per_oper == 7) {
+
+			if(op == 's') {
+				begin[cur_thr] = omp_get_wtime() * 1000000;
+				for(long long i = 0; i < imax; i += num_sum_per_oper) {
+					A[cur_thr][tmpi[cur_thr][i]] = i;
+					A[cur_thr][tmpi[cur_thr][i+1]] = i+1;
+					A[cur_thr][tmpi[cur_thr][i+2]] = i+2;
+					A[cur_thr][tmpi[cur_thr][i+3]] = i+3;
+					A[cur_thr][tmpi[cur_thr][i+4]] = i+4;
+					A[cur_thr][tmpi[cur_thr][i+5]] = i+5;
+					A[cur_thr][tmpi[cur_thr][i+6]] = i+6;
+				}
+				end[cur_thr] = omp_get_wtime() * 1000000;
+			} else if(op == 'l') {
+				begin[cur_thr] = omp_get_wtime() * 1000000;
+				for(long long i = 0; i < imax; i += num_sum_per_oper) {
+					sum[cur_thr] += A[cur_thr][tmpi[cur_thr][i]] + A[cur_thr][tmpi[cur_thr][i+1]] + A[cur_thr][tmpi[cur_thr][i+2]] + A[cur_thr][tmpi[cur_thr][i+3]] + A[cur_thr][tmpi[cur_thr][i+4]] + A[cur_thr][tmpi[cur_thr][i+5]] + A[cur_thr][tmpi[cur_thr][i+6]];
+				}
+				end[cur_thr] = omp_get_wtime() * 1000000;
+			} if(op == 't') {
+				begin[cur_thr] = omp_get_wtime() * 1000000;
+				for(long long i = 0; i < imax; i += num_sum_per_oper*3) {
+					A[cur_thr][tmpi[cur_thr][i]] = A[cur_thr][tmpi[cur_thr][i+1]] + A[cur_thr][tmpi[cur_thr][i+2]];
+					A[cur_thr][tmpi[cur_thr][i+3]] = A[cur_thr][tmpi[cur_thr][i+4]] + A[cur_thr][tmpi[cur_thr][i+5]];
+					A[cur_thr][tmpi[cur_thr][i+6]] = A[cur_thr][tmpi[cur_thr][i+7]] + A[cur_thr][tmpi[cur_thr][i+8]];
+					A[cur_thr][tmpi[cur_thr][i+9]] = A[cur_thr][tmpi[cur_thr][i+10]] + A[cur_thr][tmpi[cur_thr][i+11]];
+					A[cur_thr][tmpi[cur_thr][i+12]] = A[cur_thr][tmpi[cur_thr][i+13]] + A[cur_thr][tmpi[cur_thr][i+14]];
+					A[cur_thr][tmpi[cur_thr][i+15]] = A[cur_thr][tmpi[cur_thr][i+16]] + A[cur_thr][tmpi[cur_thr][i+17]];
+					A[cur_thr][tmpi[cur_thr][i+18]] = A[cur_thr][tmpi[cur_thr][i+19]] + A[cur_thr][tmpi[cur_thr][i+20]];
+				}
+				end[cur_thr] = omp_get_wtime() * 1000000;
+			}
+
+		} else if(num_sum_per_oper == 8) {
+
+			if(op == 's') {
+				begin[cur_thr] = omp_get_wtime() * 1000000;
+				for(long long i = 0; i < imax; i += num_sum_per_oper) {
+					A[cur_thr][tmpi[cur_thr][i]] = i;
+					A[cur_thr][tmpi[cur_thr][i+1]] = i+1;
+					A[cur_thr][tmpi[cur_thr][i+2]] = i+2;
+					A[cur_thr][tmpi[cur_thr][i+3]] = i+3;
+					A[cur_thr][tmpi[cur_thr][i+4]] = i+4;
+					A[cur_thr][tmpi[cur_thr][i+5]] = i+5;
+					A[cur_thr][tmpi[cur_thr][i+6]] = i+6;
+					A[cur_thr][tmpi[cur_thr][i+7]] = i+7;
+				}
+				end[cur_thr] = omp_get_wtime() * 1000000;
+			} else if(op == 'l') {
+				begin[cur_thr] = omp_get_wtime() * 1000000;
+				for(long long i = 0; i < imax; i += num_sum_per_oper) {
+					sum[cur_thr] += A[cur_thr][tmpi[cur_thr][i]] + A[cur_thr][tmpi[cur_thr][i+1]] + A[cur_thr][tmpi[cur_thr][i+2]] + A[cur_thr][tmpi[cur_thr][i+3]] + A[cur_thr][tmpi[cur_thr][i+4]] + A[cur_thr][tmpi[cur_thr][i+5]] + A[cur_thr][tmpi[cur_thr][i+6]] + A[cur_thr][tmpi[cur_thr][i+7]];
+				}
+				end[cur_thr] = omp_get_wtime() * 1000000;
+			} if(op == 't') {
+				begin[cur_thr] = omp_get_wtime() * 1000000;
+				for(long long i = 0; i < imax; i += num_sum_per_oper*3) {
+					A[cur_thr][tmpi[cur_thr][i]] = A[cur_thr][tmpi[cur_thr][i+1]] + A[cur_thr][tmpi[cur_thr][i+2]];
+					A[cur_thr][tmpi[cur_thr][i+3]] = A[cur_thr][tmpi[cur_thr][i+4]] + A[cur_thr][tmpi[cur_thr][i+5]];
+					A[cur_thr][tmpi[cur_thr][i+6]] = A[cur_thr][tmpi[cur_thr][i+7]] + A[cur_thr][tmpi[cur_thr][i+8]];
+					A[cur_thr][tmpi[cur_thr][i+9]] = A[cur_thr][tmpi[cur_thr][i+10]] + A[cur_thr][tmpi[cur_thr][i+11]];
+					A[cur_thr][tmpi[cur_thr][i+12]] = A[cur_thr][tmpi[cur_thr][i+13]] + A[cur_thr][tmpi[cur_thr][i+14]];
+					A[cur_thr][tmpi[cur_thr][i+15]] = A[cur_thr][tmpi[cur_thr][i+16]] + A[cur_thr][tmpi[cur_thr][i+17]];
+					A[cur_thr][tmpi[cur_thr][i+18]] = A[cur_thr][tmpi[cur_thr][i+19]] + A[cur_thr][tmpi[cur_thr][i+20]];
+					A[cur_thr][tmpi[cur_thr][i+21]] = A[cur_thr][tmpi[cur_thr][i+22]] + A[cur_thr][tmpi[cur_thr][i+23]];
+				}
+				end[cur_thr] = omp_get_wtime() * 1000000;
+			}
+
+		} else if(num_sum_per_oper == 9) {
+
+			if(op == 's') {
+				begin[cur_thr] = omp_get_wtime() * 1000000;
+				for(long long i = 0; i < imax; i += num_sum_per_oper) {
+					A[cur_thr][tmpi[cur_thr][i]] = i;
+					A[cur_thr][tmpi[cur_thr][i+1]] = i+1;
+					A[cur_thr][tmpi[cur_thr][i+2]] = i+2;
+					A[cur_thr][tmpi[cur_thr][i+3]] = i+3;
+					A[cur_thr][tmpi[cur_thr][i+4]] = i+4;
+					A[cur_thr][tmpi[cur_thr][i+5]] = i+5;
+					A[cur_thr][tmpi[cur_thr][i+6]] = i+6;
+					A[cur_thr][tmpi[cur_thr][i+7]] = i+7;
+					A[cur_thr][tmpi[cur_thr][i+8]] = i+8;
+				}
+				end[cur_thr] = omp_get_wtime() * 1000000;
+			} else if(op == 'l') {
+				begin[cur_thr] = omp_get_wtime() * 1000000;
+				for(long long i = 0; i < imax; i += num_sum_per_oper) {
+					sum[cur_thr] += A[cur_thr][tmpi[cur_thr][i]] + A[cur_thr][tmpi[cur_thr][i+1]] + A[cur_thr][tmpi[cur_thr][i+2]] + A[cur_thr][tmpi[cur_thr][i+3]] + A[cur_thr][tmpi[cur_thr][i+4]] + A[cur_thr][tmpi[cur_thr][i+5]] + A[cur_thr][tmpi[cur_thr][i+6]] + A[cur_thr][tmpi[cur_thr][i+7]] + A[cur_thr][tmpi[cur_thr][i+8]];
+				}
+				end[cur_thr] = omp_get_wtime() * 1000000;
+			} if(op == 't') {
+				begin[cur_thr] = omp_get_wtime() * 1000000;
+				for(long long i = 0; i < imax; i += num_sum_per_oper*3) {
+					A[cur_thr][tmpi[cur_thr][i]] = A[cur_thr][tmpi[cur_thr][i+1]] + A[cur_thr][tmpi[cur_thr][i+2]];
+					A[cur_thr][tmpi[cur_thr][i+3]] = A[cur_thr][tmpi[cur_thr][i+4]] + A[cur_thr][tmpi[cur_thr][i+5]];
+					A[cur_thr][tmpi[cur_thr][i+6]] = A[cur_thr][tmpi[cur_thr][i+7]] + A[cur_thr][tmpi[cur_thr][i+8]];
+					A[cur_thr][tmpi[cur_thr][i+9]] = A[cur_thr][tmpi[cur_thr][i+10]] + A[cur_thr][tmpi[cur_thr][i+11]];
+					A[cur_thr][tmpi[cur_thr][i+12]] = A[cur_thr][tmpi[cur_thr][i+13]] + A[cur_thr][tmpi[cur_thr][i+14]];
+					A[cur_thr][tmpi[cur_thr][i+15]] = A[cur_thr][tmpi[cur_thr][i+16]] + A[cur_thr][tmpi[cur_thr][i+17]];
+					A[cur_thr][tmpi[cur_thr][i+18]] = A[cur_thr][tmpi[cur_thr][i+19]] + A[cur_thr][tmpi[cur_thr][i+20]];
+					A[cur_thr][tmpi[cur_thr][i+21]] = A[cur_thr][tmpi[cur_thr][i+22]] + A[cur_thr][tmpi[cur_thr][i+23]];
+					A[cur_thr][tmpi[cur_thr][i+24]] = A[cur_thr][tmpi[cur_thr][i+25]] + A[cur_thr][tmpi[cur_thr][i+26]];
+				}
+				end[cur_thr] = omp_get_wtime() * 1000000;
+			}
+
+		} else if(num_sum_per_oper == 10) {
+
+			if(op == 's') {
+				begin[cur_thr] = omp_get_wtime() * 1000000;
+				for(long long i = 0; i < imax; i += num_sum_per_oper) {
+					A[cur_thr][tmpi[cur_thr][i]] = i;
+					A[cur_thr][tmpi[cur_thr][i+1]] = i+1;
+					A[cur_thr][tmpi[cur_thr][i+2]] = i+2;
+					A[cur_thr][tmpi[cur_thr][i+3]] = i+3;
+					A[cur_thr][tmpi[cur_thr][i+4]] = i+4;
+					A[cur_thr][tmpi[cur_thr][i+5]] = i+5;
+					A[cur_thr][tmpi[cur_thr][i+6]] = i+6;
+					A[cur_thr][tmpi[cur_thr][i+7]] = i+7;
+					A[cur_thr][tmpi[cur_thr][i+8]] = i+8;
+					A[cur_thr][tmpi[cur_thr][i+9]] = i+9;
+				}
+				end[cur_thr] = omp_get_wtime() * 1000000;
+			} else if(op == 'l') {
+				begin[cur_thr] = omp_get_wtime() * 1000000;
+				for(long long i = 0; i < imax; i += num_sum_per_oper) {
+					sum[cur_thr] += A[cur_thr][tmpi[cur_thr][i]] + A[cur_thr][tmpi[cur_thr][i+1]] + A[cur_thr][tmpi[cur_thr][i+2]] + A[cur_thr][tmpi[cur_thr][i+3]] + A[cur_thr][tmpi[cur_thr][i+4]] + A[cur_thr][tmpi[cur_thr][i+5]] + A[cur_thr][tmpi[cur_thr][i+6]] + A[cur_thr][tmpi[cur_thr][i+7]] + A[cur_thr][tmpi[cur_thr][i+8]] + A[cur_thr][tmpi[cur_thr][i+9]];
+				}
+				end[cur_thr] = omp_get_wtime() * 1000000;
+			} if(op == 't') {
+				begin[cur_thr] = omp_get_wtime() * 1000000;
+				for(long long i = 0; i < imax; i += num_sum_per_oper*3) {
+					A[cur_thr][tmpi[cur_thr][i]] = A[cur_thr][tmpi[cur_thr][i+1]] + A[cur_thr][tmpi[cur_thr][i+2]];
+					A[cur_thr][tmpi[cur_thr][i+3]] = A[cur_thr][tmpi[cur_thr][i+4]] + A[cur_thr][tmpi[cur_thr][i+5]];
+					A[cur_thr][tmpi[cur_thr][i+6]] = A[cur_thr][tmpi[cur_thr][i+7]] + A[cur_thr][tmpi[cur_thr][i+8]];
+					A[cur_thr][tmpi[cur_thr][i+9]] = A[cur_thr][tmpi[cur_thr][i+10]] + A[cur_thr][tmpi[cur_thr][i+11]];
+					A[cur_thr][tmpi[cur_thr][i+12]] = A[cur_thr][tmpi[cur_thr][i+13]] + A[cur_thr][tmpi[cur_thr][i+14]];
+					A[cur_thr][tmpi[cur_thr][i+15]] = A[cur_thr][tmpi[cur_thr][i+16]] + A[cur_thr][tmpi[cur_thr][i+17]];
+					A[cur_thr][tmpi[cur_thr][i+18]] = A[cur_thr][tmpi[cur_thr][i+19]] + A[cur_thr][tmpi[cur_thr][i+20]];
+					A[cur_thr][tmpi[cur_thr][i+21]] = A[cur_thr][tmpi[cur_thr][i+22]] + A[cur_thr][tmpi[cur_thr][i+23]];
+					A[cur_thr][tmpi[cur_thr][i+24]] = A[cur_thr][tmpi[cur_thr][i+25]] + A[cur_thr][tmpi[cur_thr][i+26]];
+					A[cur_thr][tmpi[cur_thr][i+27]] = A[cur_thr][tmpi[cur_thr][i+28]] + A[cur_thr][tmpi[cur_thr][i+29]];
+				}
+				end[cur_thr] = omp_get_wtime() * 1000000;
 			}
 		}
 
+		if (PAPI_stop(EventSet[cur_thr], values) != PAPI_OK)
+			cout << "stop PAPI ERROR" << endl;
 
-	} else if(num_sum_per_oper == 2) {
-		
-		#pragma omp parallel
+		#pragma omp critical
 		{
-			int cur_thr;
-			int papi_status;
-			int EventSet = PAPI_NULL;
-			long long values[NUM_EVENTS];
-
-			#pragma omp critical
-			{
-				if(PAPI_create_eventset(&EventSet) != PAPI_OK)
-					cout << "EventSet PAPI ERROR" << endl;
-
-				if (PAPI_add_event(EventSet, PAPI_L1_LDM) != PAPI_OK)
-			    	cout << "1add event PAPI ERROR" << endl;
-
-			    if (PAPI_add_event(EventSet, PAPI_L2_LDM) != PAPI_OK)
-			    	cout << "2add event PAPI ERROR" << endl;
-
-			    if (PAPI_add_event(EventSet, PAPI_L3_LDM) != PAPI_OK)
-			    	cout << "3add event PAPI ERROR" << endl;
-				cur_thr = omp_get_thread_num();
-				papi_status = PAPI_start(EventSet);
-
-			}
-
-			if (papi_status != PAPI_OK)
-				cout << "start PAPI ERROR" << endl;
-
-			#pragma omp barrier
-
-			begin[cur_thr] = omp_get_wtime() * 1000000;
-			for(long long i = 0; i < imax; i += num_sum_per_oper) {
-				sum[cur_thr] += A[cur_thr][tmpi[cur_thr][i]] + A[cur_thr][tmpi[cur_thr][i+1]];
-			}
-			end[cur_thr] = omp_get_wtime() * 1000000;
-
-
-			#pragma omp critical
-			{
-				papi_status = PAPI_stop(EventSet, values);
-
-				if (papi_status != PAPI_OK)
-					cout << "stop PAPI ERROR" << endl;
-				tot_L1 += values[0];
-				tot_L2 += values[1];
-				tot_L3 += values[2];
-			}
-
+			tot_L1 += values[0];
+			tot_L2 += values[1];
+			tot_L3 += values[2];
 		}
 
-	} else if(num_sum_per_oper == 3) {
-		
-		#pragma omp parallel
-		{
-			int cur_thr;
-			int papi_status;
-			int EventSet = PAPI_NULL;
-			long long values[NUM_EVENTS];
+		if( PAPI_cleanup_eventset(EventSet[cur_thr]) != PAPI_OK) 
+			cout << "cleanup eventset PAPI ERROR" << endl;
 
-			#pragma omp critical
-			{
-				if(PAPI_create_eventset(&EventSet) != PAPI_OK)
-					cout << "EventSet PAPI ERROR" << endl;
+		if(PAPI_destroy_eventset(&EventSet[cur_thr]) != PAPI_OK) 
+			cout << "destroy eventset PAPI ERROR" << endl;
 
-				if (PAPI_add_event(EventSet, PAPI_L1_LDM) != PAPI_OK)
-			    	cout << "1add event PAPI ERROR" << endl;
-
-			    if (PAPI_add_event(EventSet, PAPI_L2_LDM) != PAPI_OK)
-			    	cout << "2add event PAPI ERROR" << endl;
-
-			    if (PAPI_add_event(EventSet, PAPI_L3_LDM) != PAPI_OK)
-			    	cout << "3add event PAPI ERROR" << endl;
-				cur_thr = omp_get_thread_num();
-				papi_status = PAPI_start(EventSet);
-
-			}
-
-			if (papi_status != PAPI_OK)
-				cout << "start PAPI ERROR" << endl;
-
-			#pragma omp barrier
-
-			begin[cur_thr] = omp_get_wtime() * 1000000;
-			for(long long i = 0; i < imax; i += num_sum_per_oper) {
-				sum[cur_thr] += A[cur_thr][tmpi[cur_thr][i]] + A[cur_thr][tmpi[cur_thr][i+1]] + A[cur_thr][tmpi[cur_thr][i+2]];
-			}
-			end[cur_thr] = omp_get_wtime() * 1000000;
-
-
-			#pragma omp critical
-			{
-				papi_status = PAPI_stop(EventSet, values);
-
-				if (papi_status != PAPI_OK)
-					cout << "stop PAPI ERROR" << endl;
-				tot_L1 += values[0];
-				tot_L2 += values[1];
-				tot_L3 += values[2];
-			}
-
-		}
-
-	} else if(num_sum_per_oper == 4) {
-		
-		#pragma omp parallel
-		{
-			int cur_thr;
-			int papi_status;
-			int EventSet = PAPI_NULL;
-			long long values[NUM_EVENTS];
-
-			#pragma omp critical
-			{
-				if(PAPI_create_eventset(&EventSet) != PAPI_OK)
-					cout << "EventSet PAPI ERROR" << endl;
-
-				if (PAPI_add_event(EventSet, PAPI_L1_LDM) != PAPI_OK)
-			    	cout << "1add event PAPI ERROR" << endl;
-
-			    if (PAPI_add_event(EventSet, PAPI_L2_LDM) != PAPI_OK)
-			    	cout << "2add event PAPI ERROR" << endl;
-
-			    if (PAPI_add_event(EventSet, PAPI_L3_LDM) != PAPI_OK)
-			    	cout << "3add event PAPI ERROR" << endl;
-				cur_thr = omp_get_thread_num();
-				papi_status = PAPI_start(EventSet);
-
-			}
-
-			if (papi_status != PAPI_OK)
-				cout << "start PAPI ERROR" << endl;
-
-			#pragma omp barrier
-
-			begin[cur_thr] = omp_get_wtime() * 1000000;
-			for(long long i = 0; i < imax; i += num_sum_per_oper) {
-				sum[cur_thr] += A[cur_thr][tmpi[cur_thr][i]] + A[cur_thr][tmpi[cur_thr][i+1]] + A[cur_thr][tmpi[cur_thr][i+2]] + A[cur_thr][tmpi[cur_thr][i+3]];
-			}
-			end[cur_thr] = omp_get_wtime() * 1000000;
-
-
-			#pragma omp critical
-			{
-				papi_status = PAPI_stop(EventSet, values);
-
-				if (papi_status != PAPI_OK)
-					cout << "stop PAPI ERROR" << endl;
-				tot_L1 += values[0];
-				tot_L2 += values[1];
-				tot_L3 += values[2];
-			}
-
-		}
-
-	} else if(num_sum_per_oper == 5) {
-		
-		#pragma omp parallel
-		{
-			int cur_thr;
-			int papi_status;
-			int EventSet = PAPI_NULL;
-			long long values[NUM_EVENTS];
-
-			#pragma omp critical
-			{
-				if(PAPI_create_eventset(&EventSet) != PAPI_OK)
-					cout << "EventSet PAPI ERROR" << endl;
-
-				if (PAPI_add_event(EventSet, PAPI_L1_LDM) != PAPI_OK)
-			    	cout << "1add event PAPI ERROR" << endl;
-
-			    if (PAPI_add_event(EventSet, PAPI_L2_LDM) != PAPI_OK)
-			    	cout << "2add event PAPI ERROR" << endl;
-
-			    if (PAPI_add_event(EventSet, PAPI_L3_LDM) != PAPI_OK)
-			    	cout << "3add event PAPI ERROR" << endl;
-				cur_thr = omp_get_thread_num();
-				papi_status = PAPI_start(EventSet);
-
-			}
-
-			if (papi_status != PAPI_OK)
-				cout << "start PAPI ERROR" << endl;
-
-			#pragma omp barrier
-
-			begin[cur_thr] = omp_get_wtime() * 1000000;
-			for(long long i = 0; i < imax; i += num_sum_per_oper) {
-				sum[cur_thr] += A[cur_thr][tmpi[cur_thr][i]] + A[cur_thr][tmpi[cur_thr][i+1]] + A[cur_thr][tmpi[cur_thr][i+2]] + A[cur_thr][tmpi[cur_thr][i+3]] + A[cur_thr][tmpi[cur_thr][i+4]];
-			}
-			end[cur_thr] = omp_get_wtime() * 1000000;
-
-
-			#pragma omp critical
-			{
-				papi_status = PAPI_stop(EventSet, values);
-
-				if (papi_status != PAPI_OK)
-					cout << "stop PAPI ERROR" << endl;
-				tot_L1 += values[0];
-				tot_L2 += values[1];
-				tot_L3 += values[2];
-			}
-
-		}
-
-	} else if(num_sum_per_oper == 6) {
-		
-		#pragma omp parallel
-		{
-			int cur_thr;
-			int papi_status;
-			int EventSet = PAPI_NULL;
-			long long values[NUM_EVENTS];
-
-			#pragma omp critical
-			{
-				if(PAPI_create_eventset(&EventSet) != PAPI_OK)
-					cout << "EventSet PAPI ERROR" << endl;
-
-				if (PAPI_add_event(EventSet, PAPI_L1_LDM) != PAPI_OK)
-			    	cout << "1add event PAPI ERROR" << endl;
-
-			    if (PAPI_add_event(EventSet, PAPI_L2_LDM) != PAPI_OK)
-			    	cout << "2add event PAPI ERROR" << endl;
-
-			    if (PAPI_add_event(EventSet, PAPI_L3_LDM) != PAPI_OK)
-			    	cout << "3add event PAPI ERROR" << endl;
-				cur_thr = omp_get_thread_num();
-				papi_status = PAPI_start(EventSet);
-
-			}
-
-			if (papi_status != PAPI_OK)
-				cout << "start PAPI ERROR" << endl;
-
-			#pragma omp barrier
-
-			begin[cur_thr] = omp_get_wtime() * 1000000;
-			for(long long i = 0; i < imax; i += num_sum_per_oper) {
-				sum[cur_thr] += A[cur_thr][tmpi[cur_thr][i]] + A[cur_thr][tmpi[cur_thr][i+1]] + A[cur_thr][tmpi[cur_thr][i+2]] + A[cur_thr][tmpi[cur_thr][i+3]] + A[cur_thr][tmpi[cur_thr][i+4]] + A[cur_thr][tmpi[cur_thr][i+5]];
-			}
-			end[cur_thr] = omp_get_wtime() * 1000000;
-
-
-			#pragma omp critical
-			{
-				papi_status = PAPI_stop(EventSet, values);
-
-				if (papi_status != PAPI_OK)
-					cout << "stop PAPI ERROR" << endl;
-				tot_L1 += values[0];
-				tot_L2 += values[1];
-				tot_L3 += values[2];
-			}
-
-		}
-
-	} else if(num_sum_per_oper == 7) {
-		
-		#pragma omp parallel
-		{
-			int cur_thr;
-			int papi_status;
-			int EventSet = PAPI_NULL;
-			long long values[NUM_EVENTS];
-
-			#pragma omp critical
-			{
-				if(PAPI_create_eventset(&EventSet) != PAPI_OK)
-					cout << "EventSet PAPI ERROR" << endl;
-
-				if (PAPI_add_event(EventSet, PAPI_L1_LDM) != PAPI_OK)
-			    	cout << "1add event PAPI ERROR" << endl;
-
-			    if (PAPI_add_event(EventSet, PAPI_L2_LDM) != PAPI_OK)
-			    	cout << "2add event PAPI ERROR" << endl;
-
-			    if (PAPI_add_event(EventSet, PAPI_L3_LDM) != PAPI_OK)
-			    	cout << "3add event PAPI ERROR" << endl;
-				cur_thr = omp_get_thread_num();
-				papi_status = PAPI_start(EventSet);
-
-			}
-
-			if (papi_status != PAPI_OK)
-				cout << "start PAPI ERROR" << endl;
-
-			#pragma omp barrier
-
-			begin[cur_thr] = omp_get_wtime() * 1000000;
-			for(long long i = 0; i < imax; i += num_sum_per_oper) {
-				sum[cur_thr] += A[cur_thr][tmpi[cur_thr][i]] + A[cur_thr][tmpi[cur_thr][i+1]] + A[cur_thr][tmpi[cur_thr][i+2]] + A[cur_thr][tmpi[cur_thr][i+3]] + A[cur_thr][tmpi[cur_thr][i+4]] + A[cur_thr][tmpi[cur_thr][i+5]] + A[cur_thr][tmpi[cur_thr][i+6]];
-			}
-			end[cur_thr] = omp_get_wtime() * 1000000;
-
-
-			#pragma omp critical
-			{
-				papi_status = PAPI_stop(EventSet, values);
-
-				if (papi_status != PAPI_OK)
-					cout << "stop PAPI ERROR" << endl;
-				tot_L1 += values[0];
-				tot_L2 += values[1];
-				tot_L3 += values[2];
-			}
-
-		}
-
-	} else if(num_sum_per_oper == 8) {
-		
-		#pragma omp parallel
-		{
-			int cur_thr;
-			int papi_status;
-			int EventSet = PAPI_NULL;
-			long long values[NUM_EVENTS];
-
-			#pragma omp critical
-			{
-				if(PAPI_create_eventset(&EventSet) != PAPI_OK)
-					cout << "EventSet PAPI ERROR" << endl;
-
-				if (PAPI_add_event(EventSet, PAPI_L1_LDM) != PAPI_OK)
-			    	cout << "1add event PAPI ERROR" << endl;
-
-			    if (PAPI_add_event(EventSet, PAPI_L2_LDM) != PAPI_OK)
-			    	cout << "2add event PAPI ERROR" << endl;
-
-			    if (PAPI_add_event(EventSet, PAPI_L3_LDM) != PAPI_OK)
-			    	cout << "3add event PAPI ERROR" << endl;
-				cur_thr = omp_get_thread_num();
-				papi_status = PAPI_start(EventSet);
-
-			}
-
-			if (papi_status != PAPI_OK)
-				cout << "start PAPI ERROR" << endl;
-
-			#pragma omp barrier
-
-			begin[cur_thr] = omp_get_wtime() * 1000000;
-			for(long long i = 0; i < imax; i += num_sum_per_oper) {
-				sum[cur_thr] += A[cur_thr][tmpi[cur_thr][i]] + A[cur_thr][tmpi[cur_thr][i+1]] + A[cur_thr][tmpi[cur_thr][i+2]] + A[cur_thr][tmpi[cur_thr][i+3]] + A[cur_thr][tmpi[cur_thr][i+4]] + A[cur_thr][tmpi[cur_thr][i+5]] + A[cur_thr][tmpi[cur_thr][i+6]] + A[cur_thr][tmpi[cur_thr][i+7]];
-			}
-			end[cur_thr] = omp_get_wtime() * 1000000;
-
-
-			#pragma omp critical
-			{
-				papi_status = PAPI_stop(EventSet, values);
-
-				if (papi_status != PAPI_OK)
-					cout << "stop PAPI ERROR" << endl;
-				tot_L1 += values[0];
-				tot_L2 += values[1];
-				tot_L3 += values[2];
-			}
-
-		}
-
-	} else if(num_sum_per_oper == 9) {
-		
-		#pragma omp parallel
-		{
-			int cur_thr;
-			int papi_status;
-			int EventSet = PAPI_NULL;
-			long long values[NUM_EVENTS];
-
-			#pragma omp critical
-			{
-				if(PAPI_create_eventset(&EventSet) != PAPI_OK)
-					cout << "EventSet PAPI ERROR" << endl;
-
-				if (PAPI_add_event(EventSet, PAPI_L1_LDM) != PAPI_OK)
-			    	cout << "1add event PAPI ERROR" << endl;
-
-			    if (PAPI_add_event(EventSet, PAPI_L2_LDM) != PAPI_OK)
-			    	cout << "2add event PAPI ERROR" << endl;
-
-			    if (PAPI_add_event(EventSet, PAPI_L3_LDM) != PAPI_OK)
-			    	cout << "3add event PAPI ERROR" << endl;
-				cur_thr = omp_get_thread_num();
-				papi_status = PAPI_start(EventSet);
-
-			}
-
-			if (papi_status != PAPI_OK)
-				cout << "start PAPI ERROR" << endl;
-
-			#pragma omp barrier
-
-			begin[cur_thr] = omp_get_wtime() * 1000000;
-			for(long long i = 0; i < imax; i += num_sum_per_oper) {
-				sum[cur_thr] += A[cur_thr][tmpi[cur_thr][i]] + A[cur_thr][tmpi[cur_thr][i+1]] + A[cur_thr][tmpi[cur_thr][i+2]] + A[cur_thr][tmpi[cur_thr][i+3]] + A[cur_thr][tmpi[cur_thr][i+4]] + A[cur_thr][tmpi[cur_thr][i+5]] + A[cur_thr][tmpi[cur_thr][i+6]] + A[cur_thr][tmpi[cur_thr][i+7]] + A[cur_thr][tmpi[cur_thr][i+8]];
-			}
-			end[cur_thr] = omp_get_wtime() * 1000000;
-
-
-			#pragma omp critical
-			{
-				papi_status = PAPI_stop(EventSet, values);
-
-				if (papi_status != PAPI_OK)
-					cout << "stop PAPI ERROR" << endl;
-				tot_L1 += values[0];
-				tot_L2 += values[1];
-				tot_L3 += values[2];
-			}
-
-		}
-
-	} else if(num_sum_per_oper == 10) {
-		
-		#pragma omp parallel
-		{
-			int cur_thr;
-			int papi_status;
-			int EventSet = PAPI_NULL;
-			long long values[NUM_EVENTS];
-
-			#pragma omp critical
-			{
-				if(PAPI_create_eventset(&EventSet) != PAPI_OK)
-					cout << "EventSet PAPI ERROR" << endl;
-
-				if (PAPI_add_event(EventSet, PAPI_L1_LDM) != PAPI_OK)
-			    	cout << "1add event PAPI ERROR" << endl;
-
-			    if (PAPI_add_event(EventSet, PAPI_L2_LDM) != PAPI_OK)
-			    	cout << "2add event PAPI ERROR" << endl;
-
-			    if (PAPI_add_event(EventSet, PAPI_L3_LDM) != PAPI_OK)
-			    	cout << "3add event PAPI ERROR" << endl;
-				cur_thr = omp_get_thread_num();
-				papi_status = PAPI_start(EventSet);
-
-			}
-
-			if (papi_status != PAPI_OK)
-				cout << "start PAPI ERROR" << endl;
-
-			#pragma omp barrier
-
-			begin[cur_thr] = omp_get_wtime() * 1000000;
-			for(long long i = 0; i < imax; i += num_sum_per_oper) {
-				sum[cur_thr] += A[cur_thr][tmpi[cur_thr][i]] + A[cur_thr][tmpi[cur_thr][i+1]] + A[cur_thr][tmpi[cur_thr][i+2]] + A[cur_thr][tmpi[cur_thr][i+3]] + A[cur_thr][tmpi[cur_thr][i+4]] + A[cur_thr][tmpi[cur_thr][i+5]] + A[cur_thr][tmpi[cur_thr][i+6]] + A[cur_thr][tmpi[cur_thr][i+7]] + A[cur_thr][tmpi[cur_thr][i+8]] + A[cur_thr][tmpi[cur_thr][i+9]];
-			}
-			end[cur_thr] = omp_get_wtime() * 1000000;
-
-
-			#pragma omp critical
-			{
-				papi_status = PAPI_stop(EventSet, values);
-
-				if (papi_status != PAPI_OK)
-					cout << "stop PAPI ERROR" << endl;
-				tot_L1 += values[0];
-				tot_L2 += values[1];
-				tot_L3 += values[2];
-			}
-
-		}
-
+		if(PAPI_unregister_thread() != PAPI_OK)
+        	cout << "unregister thread PAPI ERROR" << endl;
 	}
+	cout <<"stop counting" << endl;
 	// auto end = std::chrono::high_resolution_clock::now();
 
 
 	// auto time = std::chrono::duration_cast<std::chrono::nanoseconds>(end-begin).count();
 
-	long double time = 0;
+	long double time = 0.0;
 
 	data_type total_sum = 0;
 	for(int th = 0; th < thread_num; th++){
@@ -614,21 +503,42 @@ void cache_test(vector<vector<data_type>>& A, char d_type, int num_sum_per_oper,
 		if(time < tmp_time){
 			time = tmp_time;
 		}
-		total_sum += sum[th]/100000;
+		total_sum += sum[th];
 	}
 
-	ofstream REZ("ResultOMP_ver2_4thr_gettimeofday.csv", ios::in|ios::app);
-	REZ << d_type << "; "  << total_sum << ';' << datasize << ';' << num_sum*num_sum_per_oper << ";" << thread_num << ";" << num_sum << ";" << num_sum_per_oper << ";" << segment << ';' << time << ';'  << tot_L1 << ';' << tot_L2 << ';' <<  tot_L3 << ';' << "L1, L2, L3, Cache miss per second is;" << (long double)tot_L1/(time) << ';' << (long double)tot_L2/(time) << ';' << (long double)tot_L3/(time) << endl;
+	string filename;
+	if (op == 's') {
+		filename = "store_lom2_ResultOMP_ver2_";
+	} else if (op == 'l') {
+		filename = "load_lom2_ResultOMP_ver2_";
+	} if (op == 't') {
+		filename = "total_lom2_ResultOMP_ver2_";
+	}
+	filename += to_string(cache_lv);
+	filename += "lvl_";
+	filename += to_string(thread_num);
+	filename += "thr.csv";
+
+	ofstream REZ(filename, ios::in|ios::app);
+	REZ << cache_lv << ";" << d_type << ";"  << total_sum << ";" << datasize << ";" << num_sum*num_sum_per_oper << ";" << thread_num << ";" << num_sum << ";" << num_sum_per_oper << ";" << segment << ';' << time << ';'  << tot_L1 << ';' << tot_L2 << ';' <<  tot_L3 << ';' << (long double)tot_L1/(time) << ';' << (long double)tot_L2/(time) << ';' << (long double)tot_L3/(time) << endl;
 	REZ.close();
+
+	for(int th = 0; th < thread_num; th++) {
+		delete[] tmpi[th];
+	}
+	delete[] tmpi;
 
 	return;
 
 }
 
 
-int main (int argc, char** argv) { // <Lx x - Cache level> <d/i/c - double/int/char> <num_sum - number of + operations> <num_iter>
+int main (int argc, char** argv) { // <Lx x - Cache level> <s/l - store load test> <d/i/c - double/int/char> <num_sum - number of + operations> <num_iter>
 
-	if(argv[2][0] == 'd') {
+	cache_lv = atoi(argv[1]);
+	op = argv[2][0];
+
+	if(argv[3][0] == 'd') {
     	datasize = RAM_size/(sizeof(double));
     	datasize_per_thread = datasize/thread_num;
 
@@ -639,39 +549,48 @@ int main (int argc, char** argv) { // <Lx x - Cache level> <d/i/c - double/int/c
 		uniform_int_distribution<int> fi(fiMin, fiMax);
 
 
-		vector<vector<double>> data(thread_num, vector<double>(datasize_per_thread));
+		double ** data = new double* [thread_num];
 		for(int th = 0; th < thread_num; th++){
+			data[th] = new double [datasize_per_thread];
 			for (long long i = 0; i < datasize_per_thread; i++){
 				data[th][i] = f(gen);
 			}
 		}
-		// double *trash;
 
 		mt19937 tmp_geni(time(0));
 		uniform_int_distribution<long long> tmp_fi(0, datasize_per_thread-1);
-		for (int i = 0; i < atoi(argv[4]); ++i) {
-			for(double k = 16; k >= 1.0/256; k /= 2) { 
+		for (int i = 0; i < atoi(argv[5]); ++i) {
+			for(double k = 1/4; k <= 4; k *= 2) {
+				for(int m = 1; m <= 16; m *= 2) {
+					double tmp1 = 0;
+					for (int th = 0; th < thread_num; th++) {
+						tmp1 += data[th][tmp_fi(tmp_geni)]/1000000;
+					}
+					cout << tmp1 << "  " << endl;
 
-				double tmp1 = 0;
-				for (int th = 0; th < thread_num; th++) {
-					tmp1 += data[th][tmp_fi(tmp_geni)]/1000000;
+					if(cache_lv == 1){
+						cache_test<double>(data, argv[3][0], atoi(argv[4]), k*L2size*thread_num/(sizeof(double)), L2size/m);
+					} else if(cache_lv == 2){
+						cache_test<double>(data, argv[3][0], atoi(argv[4]), k*L3size*thread_num/(sizeof(double)), L3size/m);
+					} else {
+						cache_test<double>(data, argv[3][0], atoi(argv[4]), k*datasize_per_thread*thread_num/(sizeof(double)), datasize_per_thread/m);
+					}
+
+					double tmp2 = 0;
+					for (int th = 0; th < thread_num; th++) {
+						tmp2 += data[th][tmp_fi(tmp_geni)]/1000000;
+					}
+					cout << tmp2 << endl;
 				}
-				cout << tmp1 << "  " << endl;// + trash[fi(geni)];
-
-				cache_test<double>(data, argv[2][0], atoi(argv[3]), k * L1size/sizeof(double), L2size/(64*thread_num));
-				cache_test<double>(data, argv[2][0], atoi(argv[3]), k * L2size/sizeof(double), L3size/(64*thread_num));
-				cache_test<double>(data, argv[2][0], atoi(argv[3]), k * L3size/sizeof(double), datasize_per_thread);
-
-
-				double tmp2 = 0;
-				for (int th = 0; th < thread_num; th++) {
-					tmp2 += data[th][tmp_fi(tmp_geni)]/1000000;
-				}
-				cout << tmp2 << endl;// + trash[fi(gen)] << endl;
 			}
 		}
 
-	} else if(argv[2][0] == 'i') {
+		for(int th = 0; th < thread_num; th++){
+			delete[] data[th];
+		}
+		delete[] data;
+
+	} else if(argv[3][0] == 'i') {
 	    datasize = RAM_size/(sizeof(int));
     	datasize_per_thread = datasize/thread_num;
 
@@ -684,37 +603,47 @@ int main (int argc, char** argv) { // <Lx x - Cache level> <d/i/c - double/int/c
 	    uniform_int_distribution<int> fi(fiMin, fiMax);
 
 
-		vector<vector<int>> data(thread_num, vector<int>(datasize_per_thread));
+		int** data = new int* [thread_num];
 
 		for(int th = 0; th < thread_num; th++){
+			data[th] = new int [datasize_per_thread];
 			for (long long i = 0; i < datasize_per_thread; i++){
 				data[th][i] = f(gen);
 			}
 		}
-		// int *trash;
-
 
 		mt19937 tmp_geni(time(0));
 		uniform_int_distribution<int> tmp_fi(0, datasize_per_thread - 1);
-		for (int i = 0; i < atoi(argv[4]); ++i) {
-			for(double k = 16; k >= 1.0/256; k /= 2) {
-				int tmp1 = 0;
-				for (int th = 0; th < thread_num; th++) {
-					tmp1 += data[th][tmp_fi(tmp_geni)]/1000000;
-				}
-				cout << tmp1 << "  " << endl;// + trash[fi(geni)];
+		for (int i = 0; i < atoi(argv[5]); ++i) {
+			for(double k = 1/4; k <= 4; k *= 2) {
+				for(int m = 1; m <= 16; m *= 2) {
+					int tmp1 = 0;
+					for (int th = 0; th < thread_num; th++) {
+						tmp1 += data[th][tmp_fi(tmp_geni)]/1000000;
+					}
+					cout << tmp1 << "  " << endl;
 
-				cache_test<int>(data, argv[2][0], atoi(argv[3]), k * L1size/sizeof(int), L2size/(64*thread_num));
-				cache_test<int>(data, argv[2][0], atoi(argv[3]), k * L2size/sizeof(int), L3size/(64*thread_num));
-				cache_test<int>(data, argv[2][0], atoi(argv[3]), k * L3size/sizeof(int), datasize_per_thread);
+					if(cache_lv == 1){
+						cache_test<int>(data, argv[3][0], atoi(argv[4]), k*L2size*thread_num/(sizeof(int)), L2size/m);
+					} else if(cache_lv == 2){
+						cache_test<int>(data, argv[3][0], atoi(argv[4]), k*L3size*thread_num/(sizeof(int)), L3size/m);
+					} else {
+						cache_test<int>(data, argv[3][0], atoi(argv[4]), k*datasize_per_thread*thread_num/(sizeof(int)), datasize_per_thread/m);
+					}
 
-				int tmp2 = 0;
-				for (int th = 0; th < thread_num; th++) {
-					tmp2 += data[th][tmp_fi(tmp_geni)]/1000000;
+					int tmp2 = 0;
+					for (int th = 0; th < thread_num; th++) {
+						tmp2 += data[th][tmp_fi(tmp_geni)]/1000000;
+					}
+					cout << tmp2 << endl;
 				}
-				cout << tmp2 << endl;// + trash[fi(gen)] << endl;
 			}
 		}
+
+		for(int th = 0; th < thread_num; th++){
+			delete[] data[th];
+		}
+		delete[] data;
 	}
 
 	return 0;

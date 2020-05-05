@@ -9,7 +9,7 @@ L2size = 14*256*1024;
 L3size = 35*1024*1024;
 
 op = "store"
-thread_list = [1, 2, 4, 8, 10, 12, 14]
+thread_list = [1, 2, 4, 10, 12, 14]
 
 for thread_num in thread_list:
 	thr = "_"+str(thread_num)+"thr"
@@ -50,5 +50,5 @@ for thread_num in thread_list:
 	        	maxi3 = float(cur_arr[15])
 	    
 	# print(op, " ", thread_num, " ",maxi1, " ",max_str1)
-	print(op, " ", thread_num, " ",maxi2, " ",max_str2)
-	# print(op, " ", thread_num, " ",maxi3, " ",max_str3)
+	# print(op, " ", thread_num, " ",maxi2, " ",max_str2)
+	print(op, " ", thread_num, " ",maxi3, " ",max_str3)

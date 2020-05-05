@@ -54,6 +54,7 @@ mt19937 gen_cache_test_ind(time(0));
 template<typename data_type>
 void cache_test(data_type** A, char d_type, int num_sum_per_oper, long long num_sum, long long segment) {
 	// omp_set_num_threads(thread_num);
+	cout << "___Start test___" << endl;
 
 	int* EventSet = new int[thread_num];
 
@@ -83,7 +84,7 @@ void cache_test(data_type** A, char d_type, int num_sum_per_oper, long long num_
 			for(int i = segment*offset; i <= segment*(offset+1); i++){
 				th_tmp_sum += A[th][i];
 			}
-			
+
 			#pragma omp critical
 			{
 				tmp_sum += th_tmp_sum;
@@ -93,7 +94,9 @@ void cache_test(data_type** A, char d_type, int num_sum_per_oper, long long num_
 	}
 
 	long long ** tmpi = new long long* [thread_num];
-	for(int th = 0; th < thread_num; th++) {
+	#pragma omp parallel
+	{
+		int th = omp_get_thread_num();
 		tmpi[th] = new long long [imax];
 		sum[th] = 0;
 		EventSet[th] = PAPI_NULL;
@@ -542,25 +545,30 @@ int main (int argc, char** argv) { // <Lx x - Cache level> <s/l - store load tes
     	datasize = RAM_size/(sizeof(double));
     	datasize_per_thread = datasize/thread_num;
 
-		mt19937 gen(time(0)); 
-		uniform_real_distribution<> f(fMin_double, fMax_double); 
 
 		mt19937 geni(time(0)); 
 		uniform_int_distribution<int> fi(fiMin, fiMax);
 
 
 		double ** data = new double* [thread_num];
-		for(int th = 0; th < thread_num; th++){
+
+		#pragma omp parallel
+		{	
+			int th = omp_get_thread_num();
+			mt19937 gen(time(0)+th*10); 
+			uniform_real_distribution<> f(fMin_double, fMax_double); 
+
 			data[th] = new double [datasize_per_thread];
 			for (long long i = 0; i < datasize_per_thread; i++){
 				data[th][i] = f(gen);
 			}
+
 		}
 
 		mt19937 tmp_geni(time(0));
 		uniform_int_distribution<long long> tmp_fi(0, datasize_per_thread-1);
 		for (int i = 0; i < atoi(argv[5]); ++i) {
-			for(double k = 1/4; k <= 4; k *= 2) {
+			for(double k = 0.125; k <= 2; k *= 2) {
 				for(int m = 1; m <= 16; m *= 2) {
 					double tmp1 = 0;
 					for (int th = 0; th < thread_num; th++) {
@@ -595,27 +603,29 @@ int main (int argc, char** argv) { // <Lx x - Cache level> <s/l - store load tes
     	datasize_per_thread = datasize/thread_num;
 
 
-
-		mt19937 gen(time(0)); 
-	    uniform_int_distribution<int> f(fMin_int, fMax_int); 
-
 	    mt19937 geni(time(0)); 
 	    uniform_int_distribution<int> fi(fiMin, fiMax);
 
 
 		int** data = new int* [thread_num];
 
-		for(int th = 0; th < thread_num; th++){
+		#pragma omp parallel
+		{	
+			int th = omp_get_thread_num();
+			mt19937 gen(time(0)+th*10); 
+			uniform_int_distribution<int> f(fMin_int, fMax_int);
+
 			data[th] = new int [datasize_per_thread];
 			for (long long i = 0; i < datasize_per_thread; i++){
 				data[th][i] = f(gen);
 			}
+
 		}
 
 		mt19937 tmp_geni(time(0));
 		uniform_int_distribution<int> tmp_fi(0, datasize_per_thread - 1);
 		for (int i = 0; i < atoi(argv[5]); ++i) {
-			for(double k = 1/4; k <= 4; k *= 2) {
+			for(double k = 0.125; k <= 2; k *= 2) {
 				for(int m = 1; m <= 16; m *= 2) {
 					int tmp1 = 0;
 					for (int th = 0; th < thread_num; th++) {

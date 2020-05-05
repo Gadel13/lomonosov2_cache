@@ -26,8 +26,8 @@ using namespace std;
  
 
 //all sizes in Bytes
-long long L1size = 14*32*1024;
-long long L2size = 14*256*1024;
+long long L1size = 32*1024;
+long long L2size = 256*1024;
 long long L3size = 35*1024*1024;
 
 long long RAM_size = (long long)thread_num*1024*1024*1024;
@@ -67,8 +67,28 @@ void cache_test(data_type** A, char d_type, int num_sum_per_oper, long long num_
 	}
 
 
+	if (op == 's') {
+		data_type tmp_sum = 0;
+		#pragma omp parallel
+		{
+			data_type th_tmp_sum = 0;
+			int th = omp_get_thread_num();
+			for(int i = segment*offset; i <= segment*(offset+1); i++){
+				th_tmp_sum += A[th][i];
+			}
+
+			#pragma omp critical
+			{
+				tmp_sum += th_tmp_sum;
+			}
+		}
+		cout << "tmp sum for store " << tmp_sum << endl;
+	}
+
 	long long ** tmpi = new long long* [thread_num];
-	for(int th = 0; th < thread_num; th++) {
+	#pragma omp parallel
+	{
+		int th = omp_get_thread_num();
 		tmpi[th] = new long long [imax];
 		sum[th] = 0;
 		for (long long i = 0; i < imax; i++){
@@ -91,13 +111,13 @@ void cache_test(data_type** A, char d_type, int num_sum_per_oper, long long num_
 
 		#pragma omp barrier
 
-		for(int rep = 0; rep < 10000; rep++) {
+		for(int rep = 0; rep < 5000000; rep++) {
 			if(num_sum_per_oper == 1) {
 
 				if(op == 's') {
 					begin[cur_thr] = omp_get_wtime() * 1000000;
 					for(long long i = 0; i < imax; i += num_sum_per_oper) {
-						A[cur_thr][tmpi[cur_thr][i]] *= i;
+						A[cur_thr][tmpi[cur_thr][i]] = i;
 					}
 					end[cur_thr] = omp_get_wtime() * 1000000;
 				} else if(op == 'l') {
@@ -108,8 +128,8 @@ void cache_test(data_type** A, char d_type, int num_sum_per_oper, long long num_
 					end[cur_thr] = omp_get_wtime() * 1000000;
 				} if(op == 't') {
 					begin[cur_thr] = omp_get_wtime() * 1000000;
-					for(long long i = 0; i < imax; i += num_sum_per_oper+1) {
-						A[cur_thr][tmpi[cur_thr][i]] += A[cur_thr][tmpi[cur_thr][i+1]];
+					for(long long i = 0; i < imax; i += num_sum_per_oper*3) {
+						A[cur_thr][tmpi[cur_thr][i]] = A[cur_thr][tmpi[cur_thr][i+1]] + A[cur_thr][tmpi[cur_thr][i+2]];
 					}
 					end[cur_thr] = omp_get_wtime() * 1000000;
 				}
@@ -119,8 +139,8 @@ void cache_test(data_type** A, char d_type, int num_sum_per_oper, long long num_
 				if(op == 's') {
 					begin[cur_thr] = omp_get_wtime() * 1000000;
 					for(long long i = 0; i < imax; i += num_sum_per_oper) {
-						A[cur_thr][tmpi[cur_thr][i]] *= i;
-						A[cur_thr][tmpi[cur_thr][i+1]] *= i+1;
+						A[cur_thr][tmpi[cur_thr][i]] = i;
+						A[cur_thr][tmpi[cur_thr][i+1]] = i+1;
 					}
 					end[cur_thr] = omp_get_wtime() * 1000000;
 				} else if(op == 'l') {
@@ -131,8 +151,9 @@ void cache_test(data_type** A, char d_type, int num_sum_per_oper, long long num_
 					end[cur_thr] = omp_get_wtime() * 1000000;
 				} if(op == 't') {
 					begin[cur_thr] = omp_get_wtime() * 1000000;
-					for(long long i = 0; i < imax; i += num_sum_per_oper+1) {
-						A[cur_thr][tmpi[cur_thr][i]] += A[cur_thr][tmpi[cur_thr][i+1]] + A[cur_thr][tmpi[cur_thr][i+2]];
+					for(long long i = 0; i < imax; i += num_sum_per_oper*3) {
+						A[cur_thr][tmpi[cur_thr][i]] = A[cur_thr][tmpi[cur_thr][i+1]] + A[cur_thr][tmpi[cur_thr][i+2]];
+						A[cur_thr][tmpi[cur_thr][i+3]] = A[cur_thr][tmpi[cur_thr][i+4]] + A[cur_thr][tmpi[cur_thr][i+5]];
 					}
 					end[cur_thr] = omp_get_wtime() * 1000000;
 				}
@@ -142,9 +163,9 @@ void cache_test(data_type** A, char d_type, int num_sum_per_oper, long long num_
 				if(op == 's') {
 					begin[cur_thr] = omp_get_wtime() * 1000000;
 					for(long long i = 0; i < imax; i += num_sum_per_oper) {
-						A[cur_thr][tmpi[cur_thr][i]] *= i;
-						A[cur_thr][tmpi[cur_thr][i+1]] *= i+1;
-						A[cur_thr][tmpi[cur_thr][i+2]] *= i+2;
+						A[cur_thr][tmpi[cur_thr][i]] = i;
+						A[cur_thr][tmpi[cur_thr][i+1]] = i+1;
+						A[cur_thr][tmpi[cur_thr][i+2]] = i+2;
 					}
 					end[cur_thr] = omp_get_wtime() * 1000000;
 				} else if(op == 'l')  {
@@ -155,8 +176,10 @@ void cache_test(data_type** A, char d_type, int num_sum_per_oper, long long num_
 					end[cur_thr] = omp_get_wtime() * 1000000;
 				} if(op == 't') {
 					begin[cur_thr] = omp_get_wtime() * 1000000;
-					for(long long i = 0; i < imax; i += num_sum_per_oper+1) {
-						A[cur_thr][tmpi[cur_thr][i]] += A[cur_thr][tmpi[cur_thr][i+1]] + A[cur_thr][tmpi[cur_thr][i+2]] + A[cur_thr][tmpi[cur_thr][i+3]];
+					for(long long i = 0; i < imax; i += num_sum_per_oper*3) {
+						A[cur_thr][tmpi[cur_thr][i]] = A[cur_thr][tmpi[cur_thr][i+1]] + A[cur_thr][tmpi[cur_thr][i+2]];
+						A[cur_thr][tmpi[cur_thr][i+3]] = A[cur_thr][tmpi[cur_thr][i+4]] + A[cur_thr][tmpi[cur_thr][i+5]];
+						A[cur_thr][tmpi[cur_thr][i+6]] = A[cur_thr][tmpi[cur_thr][i+7]] + A[cur_thr][tmpi[cur_thr][i+8]];
 					}
 					end[cur_thr] = omp_get_wtime() * 1000000;
 				}
@@ -166,10 +189,10 @@ void cache_test(data_type** A, char d_type, int num_sum_per_oper, long long num_
 				if(op == 's') {
 					begin[cur_thr] = omp_get_wtime() * 1000000;
 					for(long long i = 0; i < imax; i += num_sum_per_oper) {
-						A[cur_thr][tmpi[cur_thr][i]] *= i;
-						A[cur_thr][tmpi[cur_thr][i+1]] *= i+1;
-						A[cur_thr][tmpi[cur_thr][i+2]] *= i+2;
-						A[cur_thr][tmpi[cur_thr][i+3]] *= i+3;
+						A[cur_thr][tmpi[cur_thr][i]] = i;
+						A[cur_thr][tmpi[cur_thr][i+1]] = i+1;
+						A[cur_thr][tmpi[cur_thr][i+2]] = i+2;
+						A[cur_thr][tmpi[cur_thr][i+3]] = i+3;
 					}
 					end[cur_thr] = omp_get_wtime() * 1000000;
 				} else if(op == 'l')  {
@@ -180,8 +203,11 @@ void cache_test(data_type** A, char d_type, int num_sum_per_oper, long long num_
 					end[cur_thr] = omp_get_wtime() * 1000000;
 				} if(op == 't') {
 					begin[cur_thr] = omp_get_wtime() * 1000000;
-					for(long long i = 0; i < imax; i += num_sum_per_oper+1) {
-						A[cur_thr][tmpi[cur_thr][i]] += A[cur_thr][tmpi[cur_thr][i+1]] + A[cur_thr][tmpi[cur_thr][i+2]] + A[cur_thr][tmpi[cur_thr][i+3]] + A[cur_thr][tmpi[cur_thr][i+4]];
+					for(long long i = 0; i < imax; i += num_sum_per_oper*3) {
+						A[cur_thr][tmpi[cur_thr][i]] = A[cur_thr][tmpi[cur_thr][i+1]] + A[cur_thr][tmpi[cur_thr][i+2]];
+						A[cur_thr][tmpi[cur_thr][i+3]] = A[cur_thr][tmpi[cur_thr][i+4]] + A[cur_thr][tmpi[cur_thr][i+5]];
+						A[cur_thr][tmpi[cur_thr][i+6]] = A[cur_thr][tmpi[cur_thr][i+7]] + A[cur_thr][tmpi[cur_thr][i+8]];
+						A[cur_thr][tmpi[cur_thr][i+9]] = A[cur_thr][tmpi[cur_thr][i+10]] + A[cur_thr][tmpi[cur_thr][i+11]];
 					}
 					end[cur_thr] = omp_get_wtime() * 1000000;
 				}
@@ -191,11 +217,11 @@ void cache_test(data_type** A, char d_type, int num_sum_per_oper, long long num_
 				if(op == 's') {
 					begin[cur_thr] = omp_get_wtime() * 1000000;
 					for(long long i = 0; i < imax; i += num_sum_per_oper) {
-						A[cur_thr][tmpi[cur_thr][i]] *= i;
-						A[cur_thr][tmpi[cur_thr][i+1]] *= i+1;
-						A[cur_thr][tmpi[cur_thr][i+2]] *= i+2;
-						A[cur_thr][tmpi[cur_thr][i+3]] *= i+3;
-						A[cur_thr][tmpi[cur_thr][i+4]] *= i+4;
+						A[cur_thr][tmpi[cur_thr][i]] = i;
+						A[cur_thr][tmpi[cur_thr][i+1]] = i+1;
+						A[cur_thr][tmpi[cur_thr][i+2]] = i+2;
+						A[cur_thr][tmpi[cur_thr][i+3]] = i+3;
+						A[cur_thr][tmpi[cur_thr][i+4]] = i+4;
 					}
 					end[cur_thr] = omp_get_wtime() * 1000000;
 				} else if(op == 'l')  {
@@ -206,8 +232,12 @@ void cache_test(data_type** A, char d_type, int num_sum_per_oper, long long num_
 					end[cur_thr] = omp_get_wtime() * 1000000;
 				} if(op == 't') {
 					begin[cur_thr] = omp_get_wtime() * 1000000;
-					for(long long i = 0; i < imax; i += num_sum_per_oper+1) {
-						A[cur_thr][tmpi[cur_thr][i]] += A[cur_thr][tmpi[cur_thr][i+1]] + A[cur_thr][tmpi[cur_thr][i+2]] + A[cur_thr][tmpi[cur_thr][i+3]] + A[cur_thr][tmpi[cur_thr][i+4]] + A[cur_thr][tmpi[cur_thr][i+5]];
+					for(long long i = 0; i < imax; i += num_sum_per_oper*3) {
+						A[cur_thr][tmpi[cur_thr][i]] = A[cur_thr][tmpi[cur_thr][i+1]] + A[cur_thr][tmpi[cur_thr][i+2]];
+						A[cur_thr][tmpi[cur_thr][i+3]] = A[cur_thr][tmpi[cur_thr][i+4]] + A[cur_thr][tmpi[cur_thr][i+5]];
+						A[cur_thr][tmpi[cur_thr][i+6]] = A[cur_thr][tmpi[cur_thr][i+7]] + A[cur_thr][tmpi[cur_thr][i+8]];
+						A[cur_thr][tmpi[cur_thr][i+9]] = A[cur_thr][tmpi[cur_thr][i+10]] + A[cur_thr][tmpi[cur_thr][i+11]];
+						A[cur_thr][tmpi[cur_thr][i+12]] = A[cur_thr][tmpi[cur_thr][i+13]] + A[cur_thr][tmpi[cur_thr][i+14]];
 					}
 					end[cur_thr] = omp_get_wtime() * 1000000;
 				}
@@ -217,12 +247,12 @@ void cache_test(data_type** A, char d_type, int num_sum_per_oper, long long num_
 				if(op == 's') {
 					begin[cur_thr] = omp_get_wtime() * 1000000;
 					for(long long i = 0; i < imax; i += num_sum_per_oper) {
-						A[cur_thr][tmpi[cur_thr][i]] *= i;
-						A[cur_thr][tmpi[cur_thr][i+1]] *= i+1;
-						A[cur_thr][tmpi[cur_thr][i+2]] *= i+2;
-						A[cur_thr][tmpi[cur_thr][i+3]] *= i+3;
-						A[cur_thr][tmpi[cur_thr][i+4]] *= i+4;
-						A[cur_thr][tmpi[cur_thr][i+5]] *= i+5;
+						A[cur_thr][tmpi[cur_thr][i]] = i;
+						A[cur_thr][tmpi[cur_thr][i+1]] = i+1;
+						A[cur_thr][tmpi[cur_thr][i+2]] = i+2;
+						A[cur_thr][tmpi[cur_thr][i+3]] = i+3;
+						A[cur_thr][tmpi[cur_thr][i+4]] = i+4;
+						A[cur_thr][tmpi[cur_thr][i+5]] = i+5;
 					}
 					end[cur_thr] = omp_get_wtime() * 1000000;
 				} else if(op == 'l') {
@@ -233,8 +263,13 @@ void cache_test(data_type** A, char d_type, int num_sum_per_oper, long long num_
 					end[cur_thr] = omp_get_wtime() * 1000000;
 				} if(op == 't') {
 					begin[cur_thr] = omp_get_wtime() * 1000000;
-					for(long long i = 0; i < imax; i += num_sum_per_oper+1) {
-						A[cur_thr][tmpi[cur_thr][i]] += A[cur_thr][tmpi[cur_thr][i+1]] + A[cur_thr][tmpi[cur_thr][i+2]] + A[cur_thr][tmpi[cur_thr][i+3]] + A[cur_thr][tmpi[cur_thr][i+4]] + A[cur_thr][tmpi[cur_thr][i+5]] + A[cur_thr][tmpi[cur_thr][i+6]];
+					for(long long i = 0; i < imax; i += num_sum_per_oper*3) {
+						A[cur_thr][tmpi[cur_thr][i]] = A[cur_thr][tmpi[cur_thr][i+1]] + A[cur_thr][tmpi[cur_thr][i+2]];
+						A[cur_thr][tmpi[cur_thr][i+3]] = A[cur_thr][tmpi[cur_thr][i+4]] + A[cur_thr][tmpi[cur_thr][i+5]];
+						A[cur_thr][tmpi[cur_thr][i+6]] = A[cur_thr][tmpi[cur_thr][i+7]] + A[cur_thr][tmpi[cur_thr][i+8]];
+						A[cur_thr][tmpi[cur_thr][i+9]] = A[cur_thr][tmpi[cur_thr][i+10]] + A[cur_thr][tmpi[cur_thr][i+11]];
+						A[cur_thr][tmpi[cur_thr][i+12]] = A[cur_thr][tmpi[cur_thr][i+13]] + A[cur_thr][tmpi[cur_thr][i+14]];
+						A[cur_thr][tmpi[cur_thr][i+15]] = A[cur_thr][tmpi[cur_thr][i+16]] + A[cur_thr][tmpi[cur_thr][i+17]];
 					}
 					end[cur_thr] = omp_get_wtime() * 1000000;
 				}
@@ -244,13 +279,13 @@ void cache_test(data_type** A, char d_type, int num_sum_per_oper, long long num_
 				if(op == 's') {
 					begin[cur_thr] = omp_get_wtime() * 1000000;
 					for(long long i = 0; i < imax; i += num_sum_per_oper) {
-						A[cur_thr][tmpi[cur_thr][i]] *= i;
-						A[cur_thr][tmpi[cur_thr][i+1]] *= i+1;
-						A[cur_thr][tmpi[cur_thr][i+2]] *= i+2;
-						A[cur_thr][tmpi[cur_thr][i+3]] *= i+3;
-						A[cur_thr][tmpi[cur_thr][i+4]] *= i+4;
-						A[cur_thr][tmpi[cur_thr][i+5]] *= i+5;
-						A[cur_thr][tmpi[cur_thr][i+6]] *= i+6;
+						A[cur_thr][tmpi[cur_thr][i]] = i;
+						A[cur_thr][tmpi[cur_thr][i+1]] = i+1;
+						A[cur_thr][tmpi[cur_thr][i+2]] = i+2;
+						A[cur_thr][tmpi[cur_thr][i+3]] = i+3;
+						A[cur_thr][tmpi[cur_thr][i+4]] = i+4;
+						A[cur_thr][tmpi[cur_thr][i+5]] = i+5;
+						A[cur_thr][tmpi[cur_thr][i+6]] = i+6;
 					}
 					end[cur_thr] = omp_get_wtime() * 1000000;
 				} else if(op == 'l') {
@@ -261,8 +296,14 @@ void cache_test(data_type** A, char d_type, int num_sum_per_oper, long long num_
 					end[cur_thr] = omp_get_wtime() * 1000000;
 				} if(op == 't') {
 					begin[cur_thr] = omp_get_wtime() * 1000000;
-					for(long long i = 0; i < imax; i += num_sum_per_oper+1) {
-						A[cur_thr][tmpi[cur_thr][i]] += A[cur_thr][tmpi[cur_thr][i+1]] + A[cur_thr][tmpi[cur_thr][i+2]] + A[cur_thr][tmpi[cur_thr][i+3]] + A[cur_thr][tmpi[cur_thr][i+4]] + A[cur_thr][tmpi[cur_thr][i+5]] + A[cur_thr][tmpi[cur_thr][i+6]] + A[cur_thr][tmpi[cur_thr][i+7]];
+					for(long long i = 0; i < imax; i += num_sum_per_oper*3) {
+						A[cur_thr][tmpi[cur_thr][i]] = A[cur_thr][tmpi[cur_thr][i+1]] + A[cur_thr][tmpi[cur_thr][i+2]];
+						A[cur_thr][tmpi[cur_thr][i+3]] = A[cur_thr][tmpi[cur_thr][i+4]] + A[cur_thr][tmpi[cur_thr][i+5]];
+						A[cur_thr][tmpi[cur_thr][i+6]] = A[cur_thr][tmpi[cur_thr][i+7]] + A[cur_thr][tmpi[cur_thr][i+8]];
+						A[cur_thr][tmpi[cur_thr][i+9]] = A[cur_thr][tmpi[cur_thr][i+10]] + A[cur_thr][tmpi[cur_thr][i+11]];
+						A[cur_thr][tmpi[cur_thr][i+12]] = A[cur_thr][tmpi[cur_thr][i+13]] + A[cur_thr][tmpi[cur_thr][i+14]];
+						A[cur_thr][tmpi[cur_thr][i+15]] = A[cur_thr][tmpi[cur_thr][i+16]] + A[cur_thr][tmpi[cur_thr][i+17]];
+						A[cur_thr][tmpi[cur_thr][i+18]] = A[cur_thr][tmpi[cur_thr][i+19]] + A[cur_thr][tmpi[cur_thr][i+20]];
 					}
 					end[cur_thr] = omp_get_wtime() * 1000000;
 				}
@@ -272,14 +313,14 @@ void cache_test(data_type** A, char d_type, int num_sum_per_oper, long long num_
 				if(op == 's') {
 					begin[cur_thr] = omp_get_wtime() * 1000000;
 					for(long long i = 0; i < imax; i += num_sum_per_oper) {
-						A[cur_thr][tmpi[cur_thr][i]] *= i;
-						A[cur_thr][tmpi[cur_thr][i+1]] *= i+1;
-						A[cur_thr][tmpi[cur_thr][i+2]] *= i+2;
-						A[cur_thr][tmpi[cur_thr][i+3]] *= i+3;
-						A[cur_thr][tmpi[cur_thr][i+4]] *= i+4;
-						A[cur_thr][tmpi[cur_thr][i+5]] *= i+5;
-						A[cur_thr][tmpi[cur_thr][i+6]] *= i+6;
-						A[cur_thr][tmpi[cur_thr][i+7]] *= i+7;
+						A[cur_thr][tmpi[cur_thr][i]] = i;
+						A[cur_thr][tmpi[cur_thr][i+1]] = i+1;
+						A[cur_thr][tmpi[cur_thr][i+2]] = i+2;
+						A[cur_thr][tmpi[cur_thr][i+3]] = i+3;
+						A[cur_thr][tmpi[cur_thr][i+4]] = i+4;
+						A[cur_thr][tmpi[cur_thr][i+5]] = i+5;
+						A[cur_thr][tmpi[cur_thr][i+6]] = i+6;
+						A[cur_thr][tmpi[cur_thr][i+7]] = i+7;
 					}
 					end[cur_thr] = omp_get_wtime() * 1000000;
 				} else if(op == 'l') {
@@ -290,8 +331,15 @@ void cache_test(data_type** A, char d_type, int num_sum_per_oper, long long num_
 					end[cur_thr] = omp_get_wtime() * 1000000;
 				} if(op == 't') {
 					begin[cur_thr] = omp_get_wtime() * 1000000;
-					for(long long i = 0; i < imax; i += num_sum_per_oper+1) {
-						A[cur_thr][tmpi[cur_thr][i]] += A[cur_thr][tmpi[cur_thr][i+1]] + A[cur_thr][tmpi[cur_thr][i+2]] + A[cur_thr][tmpi[cur_thr][i+3]] + A[cur_thr][tmpi[cur_thr][i+4]] + A[cur_thr][tmpi[cur_thr][i+5]] + A[cur_thr][tmpi[cur_thr][i+6]] + A[cur_thr][tmpi[cur_thr][i+7]] + A[cur_thr][tmpi[cur_thr][i+8]];
+					for(long long i = 0; i < imax; i += num_sum_per_oper*3) {
+						A[cur_thr][tmpi[cur_thr][i]] = A[cur_thr][tmpi[cur_thr][i+1]] + A[cur_thr][tmpi[cur_thr][i+2]];
+						A[cur_thr][tmpi[cur_thr][i+3]] = A[cur_thr][tmpi[cur_thr][i+4]] + A[cur_thr][tmpi[cur_thr][i+5]];
+						A[cur_thr][tmpi[cur_thr][i+6]] = A[cur_thr][tmpi[cur_thr][i+7]] + A[cur_thr][tmpi[cur_thr][i+8]];
+						A[cur_thr][tmpi[cur_thr][i+9]] = A[cur_thr][tmpi[cur_thr][i+10]] + A[cur_thr][tmpi[cur_thr][i+11]];
+						A[cur_thr][tmpi[cur_thr][i+12]] = A[cur_thr][tmpi[cur_thr][i+13]] + A[cur_thr][tmpi[cur_thr][i+14]];
+						A[cur_thr][tmpi[cur_thr][i+15]] = A[cur_thr][tmpi[cur_thr][i+16]] + A[cur_thr][tmpi[cur_thr][i+17]];
+						A[cur_thr][tmpi[cur_thr][i+18]] = A[cur_thr][tmpi[cur_thr][i+19]] + A[cur_thr][tmpi[cur_thr][i+20]];
+						A[cur_thr][tmpi[cur_thr][i+21]] = A[cur_thr][tmpi[cur_thr][i+22]] + A[cur_thr][tmpi[cur_thr][i+23]];
 					}
 					end[cur_thr] = omp_get_wtime() * 1000000;
 				}
@@ -301,15 +349,15 @@ void cache_test(data_type** A, char d_type, int num_sum_per_oper, long long num_
 				if(op == 's') {
 					begin[cur_thr] = omp_get_wtime() * 1000000;
 					for(long long i = 0; i < imax; i += num_sum_per_oper) {
-						A[cur_thr][tmpi[cur_thr][i]] *= i;
-						A[cur_thr][tmpi[cur_thr][i+1]] *= i+1;
-						A[cur_thr][tmpi[cur_thr][i+2]] *= i+2;
-						A[cur_thr][tmpi[cur_thr][i+3]] *= i+3;
-						A[cur_thr][tmpi[cur_thr][i+4]] *= i+4;
-						A[cur_thr][tmpi[cur_thr][i+5]] *= i+5;
-						A[cur_thr][tmpi[cur_thr][i+6]] *= i+6;
-						A[cur_thr][tmpi[cur_thr][i+7]] *= i+7;
-						A[cur_thr][tmpi[cur_thr][i+8]] *= i+8;
+						A[cur_thr][tmpi[cur_thr][i]] = i;
+						A[cur_thr][tmpi[cur_thr][i+1]] = i+1;
+						A[cur_thr][tmpi[cur_thr][i+2]] = i+2;
+						A[cur_thr][tmpi[cur_thr][i+3]] = i+3;
+						A[cur_thr][tmpi[cur_thr][i+4]] = i+4;
+						A[cur_thr][tmpi[cur_thr][i+5]] = i+5;
+						A[cur_thr][tmpi[cur_thr][i+6]] = i+6;
+						A[cur_thr][tmpi[cur_thr][i+7]] = i+7;
+						A[cur_thr][tmpi[cur_thr][i+8]] = i+8;
 					}
 					end[cur_thr] = omp_get_wtime() * 1000000;
 				} else if(op == 'l') {
@@ -320,8 +368,16 @@ void cache_test(data_type** A, char d_type, int num_sum_per_oper, long long num_
 					end[cur_thr] = omp_get_wtime() * 1000000;
 				} if(op == 't') {
 					begin[cur_thr] = omp_get_wtime() * 1000000;
-					for(long long i = 0; i < imax; i += num_sum_per_oper+1) {
-						A[cur_thr][tmpi[cur_thr][i]] += A[cur_thr][tmpi[cur_thr][i+1]] + A[cur_thr][tmpi[cur_thr][i+2]] + A[cur_thr][tmpi[cur_thr][i+3]] + A[cur_thr][tmpi[cur_thr][i+4]] + A[cur_thr][tmpi[cur_thr][i+5]] + A[cur_thr][tmpi[cur_thr][i+6]] + A[cur_thr][tmpi[cur_thr][i+7]] + A[cur_thr][tmpi[cur_thr][i+8]] + A[cur_thr][tmpi[cur_thr][i+9]];
+					for(long long i = 0; i < imax; i += num_sum_per_oper*3) {
+						A[cur_thr][tmpi[cur_thr][i]] = A[cur_thr][tmpi[cur_thr][i+1]] + A[cur_thr][tmpi[cur_thr][i+2]];
+						A[cur_thr][tmpi[cur_thr][i+3]] = A[cur_thr][tmpi[cur_thr][i+4]] + A[cur_thr][tmpi[cur_thr][i+5]];
+						A[cur_thr][tmpi[cur_thr][i+6]] = A[cur_thr][tmpi[cur_thr][i+7]] + A[cur_thr][tmpi[cur_thr][i+8]];
+						A[cur_thr][tmpi[cur_thr][i+9]] = A[cur_thr][tmpi[cur_thr][i+10]] + A[cur_thr][tmpi[cur_thr][i+11]];
+						A[cur_thr][tmpi[cur_thr][i+12]] = A[cur_thr][tmpi[cur_thr][i+13]] + A[cur_thr][tmpi[cur_thr][i+14]];
+						A[cur_thr][tmpi[cur_thr][i+15]] = A[cur_thr][tmpi[cur_thr][i+16]] + A[cur_thr][tmpi[cur_thr][i+17]];
+						A[cur_thr][tmpi[cur_thr][i+18]] = A[cur_thr][tmpi[cur_thr][i+19]] + A[cur_thr][tmpi[cur_thr][i+20]];
+						A[cur_thr][tmpi[cur_thr][i+21]] = A[cur_thr][tmpi[cur_thr][i+22]] + A[cur_thr][tmpi[cur_thr][i+23]];
+						A[cur_thr][tmpi[cur_thr][i+24]] = A[cur_thr][tmpi[cur_thr][i+25]] + A[cur_thr][tmpi[cur_thr][i+26]];
 					}
 					end[cur_thr] = omp_get_wtime() * 1000000;
 				}
@@ -331,16 +387,16 @@ void cache_test(data_type** A, char d_type, int num_sum_per_oper, long long num_
 				if(op == 's') {
 					begin[cur_thr] = omp_get_wtime() * 1000000;
 					for(long long i = 0; i < imax; i += num_sum_per_oper) {
-						A[cur_thr][tmpi[cur_thr][i]] *= i;
-						A[cur_thr][tmpi[cur_thr][i+1]] *= i+1;
-						A[cur_thr][tmpi[cur_thr][i+2]] *= i+2;
-						A[cur_thr][tmpi[cur_thr][i+3]] *= i+3;
-						A[cur_thr][tmpi[cur_thr][i+4]] *= i+4;
-						A[cur_thr][tmpi[cur_thr][i+5]] *= i+5;
-						A[cur_thr][tmpi[cur_thr][i+6]] *= i+6;
-						A[cur_thr][tmpi[cur_thr][i+7]] *= i+7;
-						A[cur_thr][tmpi[cur_thr][i+8]] *= i+8;
-						A[cur_thr][tmpi[cur_thr][i+9]] *= i+9;
+						A[cur_thr][tmpi[cur_thr][i]] = i;
+						A[cur_thr][tmpi[cur_thr][i+1]] = i+1;
+						A[cur_thr][tmpi[cur_thr][i+2]] = i+2;
+						A[cur_thr][tmpi[cur_thr][i+3]] = i+3;
+						A[cur_thr][tmpi[cur_thr][i+4]] = i+4;
+						A[cur_thr][tmpi[cur_thr][i+5]] = i+5;
+						A[cur_thr][tmpi[cur_thr][i+6]] = i+6;
+						A[cur_thr][tmpi[cur_thr][i+7]] = i+7;
+						A[cur_thr][tmpi[cur_thr][i+8]] = i+8;
+						A[cur_thr][tmpi[cur_thr][i+9]] = i+9;
 					}
 					end[cur_thr] = omp_get_wtime() * 1000000;
 				} else if(op == 'l') {
@@ -351,8 +407,17 @@ void cache_test(data_type** A, char d_type, int num_sum_per_oper, long long num_
 					end[cur_thr] = omp_get_wtime() * 1000000;
 				} if(op == 't') {
 					begin[cur_thr] = omp_get_wtime() * 1000000;
-					for(long long i = 0; i < imax; i += num_sum_per_oper+1) {
-						A[cur_thr][tmpi[cur_thr][i]] += A[cur_thr][tmpi[cur_thr][i+1]] + A[cur_thr][tmpi[cur_thr][i+2]] + A[cur_thr][tmpi[cur_thr][i+3]] + A[cur_thr][tmpi[cur_thr][i+4]] + A[cur_thr][tmpi[cur_thr][i+5]] + A[cur_thr][tmpi[cur_thr][i+6]] + A[cur_thr][tmpi[cur_thr][i+7]] + A[cur_thr][tmpi[cur_thr][i+8]] + A[cur_thr][tmpi[cur_thr][i+9]] + A[cur_thr][tmpi[cur_thr][i+10]];
+					for(long long i = 0; i < imax; i += num_sum_per_oper*3) {
+						A[cur_thr][tmpi[cur_thr][i]] = A[cur_thr][tmpi[cur_thr][i+1]] + A[cur_thr][tmpi[cur_thr][i+2]];
+						A[cur_thr][tmpi[cur_thr][i+3]] = A[cur_thr][tmpi[cur_thr][i+4]] + A[cur_thr][tmpi[cur_thr][i+5]];
+						A[cur_thr][tmpi[cur_thr][i+6]] = A[cur_thr][tmpi[cur_thr][i+7]] + A[cur_thr][tmpi[cur_thr][i+8]];
+						A[cur_thr][tmpi[cur_thr][i+9]] = A[cur_thr][tmpi[cur_thr][i+10]] + A[cur_thr][tmpi[cur_thr][i+11]];
+						A[cur_thr][tmpi[cur_thr][i+12]] = A[cur_thr][tmpi[cur_thr][i+13]] + A[cur_thr][tmpi[cur_thr][i+14]];
+						A[cur_thr][tmpi[cur_thr][i+15]] = A[cur_thr][tmpi[cur_thr][i+16]] + A[cur_thr][tmpi[cur_thr][i+17]];
+						A[cur_thr][tmpi[cur_thr][i+18]] = A[cur_thr][tmpi[cur_thr][i+19]] + A[cur_thr][tmpi[cur_thr][i+20]];
+						A[cur_thr][tmpi[cur_thr][i+21]] = A[cur_thr][tmpi[cur_thr][i+22]] + A[cur_thr][tmpi[cur_thr][i+23]];
+						A[cur_thr][tmpi[cur_thr][i+24]] = A[cur_thr][tmpi[cur_thr][i+25]] + A[cur_thr][tmpi[cur_thr][i+26]];
+						A[cur_thr][tmpi[cur_thr][i+27]] = A[cur_thr][tmpi[cur_thr][i+28]] + A[cur_thr][tmpi[cur_thr][i+29]];
 					}
 					end[cur_thr] = omp_get_wtime() * 1000000;
 				}
@@ -446,11 +511,11 @@ int main (int argc, char** argv) { // <Lx x - Cache level> <s/l - store load tes
 		cout << tmp1 << "  " << endl;
 
 		if(cache_lv == 1){
-			cache_test<double>(data, argv[3][0], atoi(argv[4]), pow(2,20), L2size/(64*thread_num));
+			cache_test<double>(data, argv[3][0], atoi(argv[4]), L2size*thread_num/(sizeof(double)), L2size/sizeof(double));
 		} else if(cache_lv == 2){
-			cache_test<double>(data, argv[3][0], atoi(argv[4]), pow(2,20), L3size/(64*thread_num));
+			cache_test<double>(data, argv[3][0], atoi(argv[4]), L3size/(sizeof(double)), L3size/sizeof(double));
 		} else {
-			cache_test<double>(data, argv[3][0], atoi(argv[4]), pow(2,20), datasize_per_thread);
+			cache_test<double>(data, argv[3][0], atoi(argv[4]), L3size*thread_num/(sizeof(double)), datasize_per_thread);
 		}
 
 		double tmp2 = 0;
@@ -496,11 +561,11 @@ int main (int argc, char** argv) { // <Lx x - Cache level> <s/l - store load tes
 		cout << tmp1 << "  " << endl;
 
 		if(cache_lv == 1){
-			cache_test<int>(data, argv[3][0], atoi(argv[4]), pow(2,20), L2size/(64*thread_num));
+			cache_test<int>(data, argv[3][0], atoi(argv[4]), L2size*thread_num/(sizeof(int)), L2size/sizeof(int));
 		} else if(cache_lv == 2){
-			cache_test<int>(data, argv[3][0], atoi(argv[4]), pow(2,20), L3size/(64*thread_num));
+			cache_test<int>(data, argv[3][0], atoi(argv[4]), L3size/(sizeof(int)), L3size/sizeof(int));
 		} else {
-			cache_test<int>(data, argv[3][0], atoi(argv[4]), pow(2,20), datasize_per_thread);
+			cache_test<int>(data, argv[3][0], atoi(argv[4]), L3size*thread_num/(sizeof(int)), datasize_per_thread);
 		}
 
 		int tmp2 = 0;
